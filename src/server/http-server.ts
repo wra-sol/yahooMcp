@@ -13,6 +13,7 @@ export class HttpOAuthServer {
   private port: number;
   private tokenFilePath: string;
   private mcpServer?: YahooFantasyMcpServer;
+  private sseClients: Map<string, ReadableStreamDefaultController> = new Map();
 
   constructor(credentials: OAuthCredentials, port: number = 3000) {
     this.credentials = credentials;
@@ -39,7 +40,7 @@ export class HttpOAuthServer {
         headers: {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Allow-Headers': 'Content-Type, X-Session-Id',
           'Access-Control-Max-Age': '86400',
         },
       });
@@ -411,27 +412,71 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
    */
   private async handleMcpSSE(req: Request): Promise<Response> {
     if (!this.mcpServer) {
-      return new Response(JSON.stringify({ error: 'MCP server not initialized' }), {
+      // Return 503 with proper error response
+      const errorStream = new ReadableStream({
+        start: (controller) => {
+          const encoder = new TextEncoder();
+          const errorMessage = {
+            jsonrpc: '2.0',
+            error: {
+              code: -32603,
+              message: 'MCP server not initialized. Please authenticate first.',
+            },
+          };
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(errorMessage)}\n\n`));
+          controller.close();
+        },
+      });
+      
+      return new Response(errorStream, {
         status: 503,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*',
+        },
       });
     }
 
-    if (!this.credentials.accessToken || !this.credentials.accessTokenSecret) {
-      return new Response(JSON.stringify({ error: 'Not authenticated with Yahoo' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
+    // Generate unique session ID
+    const sessionId = crypto.randomUUID();
+    const isAuthenticated = !!(this.credentials.accessToken && this.credentials.accessTokenSecret);
+    console.error(`[SSE] New connection: ${sessionId} (authenticated: ${isAuthenticated})`);
 
     // Create SSE stream
     const stream = new ReadableStream({
       start: async (controller) => {
         try {
-          // Send initial connection event
+          // Store controller for this session
+          this.sseClients.set(sessionId, controller);
+          
           const encoder = new TextEncoder();
-          controller.enqueue(encoder.encode('event: endpoint\n'));
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ endpoint: '/mcp/message' })}\n\n`));
+          
+          // Send session ID as first message (MCP SSE format)
+          const sessionMessage = {
+            jsonrpc: '2.0',
+            method: 'session',
+            params: {
+              sessionId,
+              endpoint: '/mcp/message',
+              authenticated: isAuthenticated,
+            },
+          };
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(sessionMessage)}\n\n`));
+          
+          // Send authentication warning if not authenticated
+          if (!isAuthenticated) {
+            const warningMessage = {
+              jsonrpc: '2.0',
+              method: 'notification',
+              params: {
+                level: 'warning',
+                message: 'Not authenticated with Yahoo. Visit the home page to authenticate.',
+              },
+            };
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(warningMessage)}\n\n`));
+          }
           
           // Keep connection alive with periodic pings
           const pingInterval = setInterval(() => {
@@ -439,12 +484,15 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
               controller.enqueue(encoder.encode(': ping\n\n'));
             } catch (e) {
               clearInterval(pingInterval);
+              this.sseClients.delete(sessionId);
             }
           }, 30000);
 
           // Handle connection close
           req.signal.addEventListener('abort', () => {
+            console.error(`[SSE] Connection closed: ${sessionId}`);
             clearInterval(pingInterval);
+            this.sseClients.delete(sessionId);
             try {
               controller.close();
             } catch (e) {
@@ -452,7 +500,8 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
             }
           });
         } catch (error: any) {
-          console.error('SSE error:', error);
+          console.error('[SSE] Error:', error);
+          this.sseClients.delete(sessionId);
           controller.error(error);
         }
       },
@@ -466,6 +515,7 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type',
+        'X-Session-Id': sessionId,
       },
     });
   }
@@ -496,25 +546,48 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
 
     try {
       const message = await req.json();
+      console.error(`[MCP] Received message: ${message.method} (id: ${message.id})`);
       
-      // Handle the JSON-RPC request directly
+      // Get session ID from headers
+      const sessionId = req.headers.get('X-Session-Id');
+      
+      // Handle the JSON-RPC request
       const result = await this.mcpServer.handleJsonRpcRequest(message);
-
+      console.error(`[MCP] Sending response for id: ${message.id}`);
+      
+      // If we have an SSE connection for this session, send response through SSE
+      if (sessionId && this.sseClients.has(sessionId)) {
+        const controller = this.sseClients.get(sessionId);
+        if (controller) {
+          try {
+            const encoder = new TextEncoder();
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(result)}\n\n`));
+            console.error(`[MCP] Response sent via SSE for session: ${sessionId}`);
+          } catch (error) {
+            console.error(`[MCP] Failed to send via SSE: ${error}`);
+            // Fall through to HTTP response
+          }
+        }
+      }
+      
+      // Also return via HTTP (for compatibility)
       return new Response(JSON.stringify(result), {
         headers: { 
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Allow-Headers': 'Content-Type, X-Session-Id',
         },
       });
     } catch (error: any) {
-      console.error('MCP message error:', error);
-      return new Response(JSON.stringify({ 
+      console.error('[MCP] Message error:', error);
+      const errorResponse = { 
         error: error.message || 'Internal server error',
         jsonrpc: '2.0',
         id: null,
-      }), {
+      };
+      
+      return new Response(JSON.stringify(errorResponse), {
         status: 500,
         headers: { 
           'Content-Type': 'application/json',

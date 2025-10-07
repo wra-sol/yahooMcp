@@ -216,6 +216,25 @@ Create a workflow that:
 
 ## Troubleshooting
 
+### "Could not connect to your MCP server" Error
+
+**Cause**: n8n cannot establish an SSE connection to the server.
+
+**Solution**:
+1. **Check server is running**: Visit `https://yahoo-mcp-production.up.railway.app/health`
+   - Should return `{"status": "ok", "mcpEnabled": true}`
+2. **Verify the URL is correct**: 
+   - Server URL should be: `https://yahoo-mcp-production.up.railway.app/mcp`
+   - Make sure there's no trailing slash
+3. **Test SSE connection manually**:
+   ```bash
+   curl -N -H "Accept: text/event-stream" \
+     https://yahoo-mcp-production.up.railway.app/mcp
+   ```
+   - Should receive a session message with sessionId
+4. **Check Railway logs** for any error messages
+5. **Authentication**: The SSE connection will work even without auth, but you must authenticate before running tools
+
 ### "MCP server not initialized" Error
 
 **Cause**: The server hasn't been properly initialized or authenticated.
@@ -224,32 +243,55 @@ Create a workflow that:
 1. Visit `https://yahoo-mcp-production.up.railway.app/`
 2. Complete the OAuth authentication
 3. Verify the "Authenticated" status is green
+4. Check health endpoint shows `"authenticated": true`
 
 ### "Not authenticated with Yahoo" Error
 
-**Cause**: OAuth tokens are missing or expired.
+**Cause**: OAuth tokens are missing or expired when trying to execute tools.
 
 **Solution**:
-1. Re-authenticate at `https://yahoo-mcp-production.up.railway.app/oauth/start`
-2. Tokens should be automatically saved
-3. Restart your n8n workflow
+1. Visit `https://yahoo-mcp-production.up.railway.app/`
+2. Click "Authenticate with Yahoo" and complete the flow
+3. Tokens are automatically saved to the server
+4. No need to restart - tokens are updated in real-time
 
 ### Connection Timeout
 
-**Cause**: The Railway deployment might be cold-starting.
+**Cause**: The Railway deployment might be cold-starting or the SSE connection dropped.
 
 **Solution**:
-1. Visit the web UI first to wake up the server
-2. Try the request again after 5-10 seconds
+1. Visit the web UI first to wake up the server: `https://yahoo-mcp-production.up.railway.app/`
+2. Wait for the health check to return successfully
+3. Try the n8n connection again after 5-10 seconds
+4. Check Railway logs for "SSE New connection" messages
 
 ### Invalid Tool Name
 
 **Cause**: The tool name doesn't exist or is misspelled.
 
 **Solution**:
-1. Use the "List Tools" operation first
+1. Use the "List Tools" operation first to see all available tools
 2. Copy the exact tool name from the response
-3. Tool names are case-sensitive
+3. Tool names are case-sensitive (e.g., `get_user_leagues` not `getUserLeagues`)
+
+### SSE Connection Drops Frequently
+
+**Cause**: Railway or network may be closing idle connections.
+
+**Solution**:
+1. The server sends ping messages every 30 seconds to keep connections alive
+2. If using a proxy/CDN, ensure it supports long-lived SSE connections
+3. Check Railway logs for "Connection closed" messages to see if it's client or server side
+
+### Tools Return Empty or Error Responses
+
+**Cause**: Token might be expired or invalid.
+
+**Solution**:
+1. Check server logs for token refresh messages
+2. Re-authenticate if needed at `/oauth/start`
+3. Verify your Yahoo Developer App is still active
+4. Check that you have the correct permissions in your fantasy leagues
 
 ## Advanced Usage
 
@@ -263,12 +305,28 @@ The MCP endpoints can be called from:
 
 ### Direct HTTP Testing
 
-Test with curl:
+**Step 1: Test the SSE connection**
 
 ```bash
-# List tools
+# Connect to SSE endpoint - should receive session message
+curl -N -H "Accept: text/event-stream" \
+  https://yahoo-mcp-production.up.railway.app/mcp
+
+# Expected output (session ID will be different):
+# data: {"jsonrpc":"2.0","method":"session","params":{"sessionId":"abc-123","endpoint":"/mcp/message","authenticated":true}}
+#
+# : ping
+```
+
+**Step 2: Test with session ID**
+
+Once you have the session ID from the SSE connection, you can send messages:
+
+```bash
+# List tools (replace SESSION_ID with your actual session ID)
 curl -X POST https://yahoo-mcp-production.up.railway.app/mcp/message \
   -H "Content-Type: application/json" \
+  -H "X-Session-Id: SESSION_ID" \
   -d '{
     "jsonrpc": "2.0",
     "id": 1,
@@ -279,6 +337,7 @@ curl -X POST https://yahoo-mcp-production.up.railway.app/mcp/message \
 # Get your leagues
 curl -X POST https://yahoo-mcp-production.up.railway.app/mcp/message \
   -H "Content-Type: application/json" \
+  -H "X-Session-Id: SESSION_ID" \
   -d '{
     "jsonrpc": "2.0",
     "id": 2,
@@ -287,6 +346,22 @@ curl -X POST https://yahoo-mcp-production.up.railway.app/mcp/message \
       "name": "get_user_leagues",
       "arguments": {"gameKey": "nfl"}
     }
+  }'
+```
+
+**Step 3: Test without session (also works)**
+
+The server supports both session-based (SSE) and sessionless (HTTP only) modes:
+
+```bash
+# List tools without session ID
+curl -X POST https://yahoo-mcp-production.up.railway.app/mcp/message \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/list",
+    "params": {}
   }'
 ```
 
