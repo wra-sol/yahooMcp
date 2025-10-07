@@ -202,7 +202,38 @@ This shows all games you're in, then use the game key to get leagues.
 
 - 📖 Read the [Full README](README.md) for all features
 - 📚 Check [API Documentation](API_DOCUMENTATION.md) for complete tool reference
+- 🔗 See [n8n Setup Guide](N8N_SETUP.md) for workflow automation
+- 🔧 Review [Integration Guide](INTEGRATION_GUIDE.md) for all integration options
 - 🔍 Explore [Example Usage](src/test/example.ts) for more examples
+
+## Integration Options
+
+### Use with n8n (Workflow Automation)
+
+Perfect for automating fantasy league management:
+
+```
+1. Deploy to Railway: https://yahoo-mcp-production.up.railway.app/
+2. Authenticate via web UI
+3. In n8n: Add MCP Client node
+4. Set Server URL: https://yahoo-mcp-production.up.railway.app/mcp
+5. Build workflows!
+```
+
+See [N8N_SETUP.md](N8N_SETUP.md) for complete instructions.
+
+### Use with Cursor/Claude Desktop (Local AI)
+
+Perfect for local development and AI assistance:
+
+```
+1. Run locally: bun start
+2. Set USE_STDIO=true
+3. Configure in Cursor/Claude Desktop settings
+4. Access via AI chat!
+```
+
+See [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md) for complete instructions.
 
 ## Quick Reference Card
 

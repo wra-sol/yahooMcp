@@ -25,7 +25,10 @@ A comprehensive Model Context Protocol (MCP) server providing full access to the
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Authentication Setup](#authentication-setup)
-- [n8n Integration](#n8n-integration)
+- [Integration Options](#integration-options)
+  - [n8n Integration](#n8n-integration)
+  - [Cursor/Claude Desktop](#cursorclaude-desktop)
+  - [Direct HTTP/API](#direct-httpapi)
 - [Usage Examples](#usage-examples)
 - [API Reference](#api-reference)
 - [Available Tools](#available-tools)
@@ -134,15 +137,61 @@ The server runs in dual mode:
 - **HTTP Server** (port 3000): OAuth management, health checks, and MCP endpoints
 - **MCP Protocol**: Available via both stdio (local) and HTTP/SSE (remote)
 
-### 5. Integration Options
+## 🔌 Integration Options
 
-**For Local MCP Clients (Cursor, Claude Desktop):**
-- Set `USE_STDIO=true` environment variable
-- Configure client to use stdio transport
+The Yahoo Fantasy MCP Server supports multiple integration methods. Choose the one that fits your use case:
 
-**For Remote Clients (n8n, web apps):**
-- Use HTTP/SSE endpoints at `/mcp` and `/mcp/message`
-- See [n8n Setup Guide](N8N_SETUP.md) for detailed instructions
+### n8n Integration
+
+Perfect for **workflow automation** and **scheduled tasks**.
+
+**Quick Setup:**
+1. Deploy to Railway or run locally
+2. Authenticate via web UI
+3. Add MCP Client node in n8n
+4. Set Server URL to `https://your-server.com/mcp`
+
+**Use Cases:**
+- Automated waiver wire pickups
+- Weekly standings reports
+- Trade analysis and alerts
+- Lineup optimization
+
+📖 **Full Guide**: [N8N_SETUP.md](N8N_SETUP.md)
+
+### Cursor/Claude Desktop
+
+Perfect for **local development** and **AI-assisted coding**.
+
+**Quick Setup:**
+1. Run locally with `USE_STDIO=true`
+2. Configure in Cursor/Claude Desktop settings
+3. Access via AI chat interface
+
+**Use Cases:**
+- Interactive league management
+- Data analysis and queries
+- Development and testing
+- AI-assisted fantasy decisions
+
+📖 **Full Guide**: [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md#cursorclaude-desktop-integration)
+
+### Direct HTTP/API
+
+Perfect for **custom applications** and **web integrations**.
+
+**Quick Setup:**
+1. Deploy server to Railway/Heroku
+2. Make JSON-RPC requests to `/mcp/message`
+3. Use standard HTTP clients (curl, fetch, axios, etc.)
+
+**Use Cases:**
+- Custom web applications
+- Mobile apps
+- Slack/Discord bots
+- Data analysis tools
+
+📖 **Full Guide**: [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md#direct-http-integration)
 
 ## 🔐 Authentication Setup
 
@@ -197,28 +246,6 @@ Tokens can be refreshed using the session handle:
 ```typescript
 await oauthClient.refreshAccessToken(sessionHandle);
 ```
-
-## 🔗 n8n Integration
-
-The Yahoo Fantasy MCP server supports **n8n workflow automation** via HTTP/SSE transport.
-
-### Quick n8n Setup
-
-1. **Deploy your server** (Railway, Heroku, etc.) or run locally
-2. **Authenticate** via the web interface
-3. **Add MCP Client node** in n8n
-4. **Configure**:
-   - Connection Type: `Server-Sent Events (SSE)`
-   - Server URL: `https://your-server.com/mcp`
-
-### Example n8n Workflows
-
-- **Automated Waiver Wire**: Runs nightly to pick up top free agents
-- **League Monitor**: Weekly standings reports via email/Slack
-- **Trade Analyzer**: Evaluate trades using player stats
-- **Lineup Optimizer**: Set optimal lineups based on matchups
-
-📖 **Full Guide**: See [N8N_SETUP.md](N8N_SETUP.md) for complete n8n integration instructions and workflow examples.
 
 ## 📚 Usage Examples
 
@@ -749,10 +776,17 @@ await oauthClient.refreshAccessToken(sessionHandle);
 
 ## 📚 Resources
 
-- [Yahoo Fantasy Sports API Documentation](https://developer.yahoo.com/fantasysports/guide/)
-- [OAuth 1.0a Specification](https://oauth.net/core/1.0a/)
+### Documentation
+- [Quick Start Guide](QUICKSTART.md) - Get started in 5 minutes
+- [n8n Setup Guide](N8N_SETUP.md) - Workflow automation with n8n
+- [Integration Guide](INTEGRATION_GUIDE.md) - All integration options
+- [API Documentation](API_DOCUMENTATION.md) - Complete tool reference
+
+### External Links
+- [Yahoo Fantasy Sports API](https://developer.yahoo.com/fantasysports/guide/)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
-- [TypeScript Documentation](https://www.typescriptlang.org/docs/)
+- [n8n Documentation](https://docs.n8n.io/)
+- [Bun Documentation](https://bun.sh/docs)
 
 ## 🤝 Contributing
 
