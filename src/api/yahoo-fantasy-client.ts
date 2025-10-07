@@ -1,0 +1,1156 @@
+import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
+import { YahooOAuthClient } from '../oauth/oauth-client.js';
+import {
+  YahooApiResponse,
+  YahooApiError,
+  Game,
+  GamesCollection,
+  League,
+  Team,
+  Player,
+  Transaction,
+  Standing,
+  Matchup,
+  User,
+  UsersCollection,
+  LeagueFilters,
+  PlayerFilters,
+  TransactionFilters,
+  OAuthCredentials,
+  LeagueSettings,
+} from '../types/index.js';
+
+export class YahooFantasyClient {
+  private oauthClient: YahooOAuthClient;
+  private baseUrl = 'https://fantasysports.yahooapis.com/fantasy/v2';
+
+  constructor(credentials: OAuthCredentials) {
+    this.oauthClient = new YahooOAuthClient(credentials);
+  }
+
+  /**
+   * Update OAuth credentials
+   */
+  updateCredentials(credentials: Partial<OAuthCredentials>): void {
+    this.oauthClient.updateCredentials(credentials);
+  }
+
+  /**
+   * Make authenticated request to Yahoo Fantasy API
+   */
+  private async makeRequest<T>(
+    method: 'GET' | 'POST',
+    endpoint: string,
+    data?: any
+  ): Promise<T> {
+    if (!this.oauthClient.hasValidAccessToken()) {
+      throw new Error('No valid access token available. Please authenticate first.');
+    }
+
+    const url = `${this.baseUrl}${endpoint}`;
+    const authHeader = this.oauthClient.createAuthHeader(method, url, data);
+
+    const config: AxiosRequestConfig = {
+      method,
+      url,
+      headers: {
+        ...authHeader,
+        'Content-Type': 'application/xml',
+        'Accept': 'application/xml',
+      },
+    };
+
+    if (data && method === 'POST') {
+      config.data = data;
+    }
+
+    try {
+      const response: AxiosResponse<YahooApiResponse<T>> = await axios(config);
+      return response.data.fantasy_content;
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        throw new Error('Authentication failed. Please re-authenticate.');
+      }
+      throw new Error(`API request failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get user's games
+   */
+  async getUserGames(gameKeys?: string[]): Promise<GamesCollection> {
+    const gameKeysParam = gameKeys ? `;game_keys=${gameKeys.join(',')}` : '';
+    return this.makeRequest<GamesCollection>('GET', `/users;use_login=1/games${gameKeysParam}`);
+  }
+
+  /**
+   * Get detailed game information
+   */
+  async getGameInfo(gameKey: string): Promise<Game> {
+    return this.makeRequest<Game>('GET', `/game/${gameKey}`);
+  }
+
+  /**
+   * Get game metadata and settings
+   */
+  async getGameMetadata(gameKey: string): Promise<any> {
+    return this.makeRequest<any>('GET', `/game/${gameKey}/metadata`);
+  }
+
+  /**
+   * Get stat categories for a game
+   */
+  async getGameStatCategories(gameKey: string): Promise<{ stat_categories: any[]; count: number }> {
+    const response = await this.makeRequest<any>('GET', `/game/${gameKey}/stat_categories`);
+    return {
+      stat_categories: response.stat_categories || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get user's leagues for a specific game
+   */
+  async getUserLeagues(gameKey: string): Promise<{ leagues: League[]; count: number }> {
+    const response = await this.makeRequest<any>('GET', `/users;use_login=1/games;game_keys=${gameKey}/leagues`);
+    return {
+      leagues: response.leagues || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get user profile information
+   */
+  async getUserProfile(): Promise<User> {
+    return this.makeRequest<User>('GET', `/users;use_login=1/profile`);
+  }
+
+  /**
+   * Get all teams for the current user across games
+   */
+  async getUserTeams(): Promise<{ teams: Team[]; count: number }> {
+    const response = await this.makeRequest<any>('GET', `/users;use_login=1/teams`);
+    return {
+      teams: response.teams || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get historical league data (past seasons)
+   */
+  async getLeagueHistory(leagueKey: string): Promise<any> {
+    // Yahoo API allows fetching historical data via past league keys
+    // This returns league information with historical standings and results
+    return this.makeRequest<any>('GET', `/league/${leagueKey};out=standings,settings,scoreboard`);
+  }
+
+  /**
+   * Get historical team performance data
+   */
+  async getTeamHistory(teamKey: string): Promise<any> {
+    // Get team with historical stats, matchups, and standings
+    return this.makeRequest<any>('GET', `/team/${teamKey};out=stats,standings,matchups`);
+  }
+
+  /**
+   * Get live scoring updates for a league
+   */
+  async getLiveScores(leagueKey: string, week?: string): Promise<{ matchups: Matchup[]; count: number }> {
+    // Live scores are available via scoreboard with current stats
+    const weekParam = week ? `;week=${week}` : '';
+    const endpoint = `/league/${leagueKey}/scoreboard${weekParam};out=matchups`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      matchups: response.scoreboard?.matchups || [],
+      count: response.scoreboard?.count || 0,
+    };
+  }
+
+  /**
+   * Get real-time game updates
+   */
+  async getGameUpdates(gameKey: string): Promise<any> {
+    // Get current game state and updates
+    return this.makeRequest<any>('GET', `/game/${gameKey};out=game_weeks,stat_categories`);
+  }
+
+  /**
+   * Get league details
+   */
+  async getLeague(leagueKey: string, filters?: LeagueFilters): Promise<League> {
+    const params = this.buildFilterParams(filters);
+    const endpoint = `/league/${leagueKey}${params}`;
+    return this.makeRequest<League>('GET', endpoint);
+  }
+
+  /**
+   * Get league standings
+   */
+  async getLeagueStandings(leagueKey: string): Promise<{ standings: Standing[]; count: number }> {
+    const response = await this.makeRequest<any>('GET', `/league/${leagueKey}/standings`);
+    return {
+      standings: response.standings || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get league settings
+   */
+  async getLeagueSettings(leagueKey: string): Promise<LeagueSettings> {
+    return this.makeRequest<LeagueSettings>('GET', `/league/${leagueKey}/settings`);
+  }
+
+  /**
+   * Get league metadata
+   */
+  async getLeagueMetadata(leagueKey: string): Promise<any> {
+    // Yahoo supports metadata via out param or a dedicated subresource
+    // Prefer direct subresource if available
+    return this.makeRequest<any>('GET', `/league/${leagueKey}/metadata`);
+  }
+
+  /**
+   * Get league rosters (all team rosters within a league)
+   */
+  async getLeagueRosters(leagueKey: string): Promise<{ teams: Team[]; count: number }> {
+    const endpoint = `/league/${leagueKey}/teams;out=roster`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      teams: response.teams || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get draft results for a league
+   */
+  async getDraftResults(leagueKey: string): Promise<{ draft_results: any[]; count: number }> {
+    const response = await this.makeRequest<any>('GET', `/league/${leagueKey}/draftresults`);
+    return {
+      draft_results: response.draft_results || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get draft teams information
+   */
+  async getDraftTeams(leagueKey: string): Promise<{ teams: Team[]; count: number }> {
+    // Include draft results per team via out param
+    const response = await this.makeRequest<any>('GET', `/league/${leagueKey}/teams;out=draft_results`);
+    return {
+      teams: response.teams || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get draft settings for a league
+   */
+  async getDraftSettings(leagueKey: string): Promise<LeagueSettings> {
+    // Draft settings are part of league settings
+    return this.makeRequest<LeagueSettings>('GET', `/league/${leagueKey}/settings`);
+  }
+
+  /**
+   * Get league teams
+   */
+  async getLeagueTeams(leagueKey: string, filters?: LeagueFilters): Promise<{ teams: Team[]; count: number }> {
+    const params = this.buildFilterParams(filters);
+    const endpoint = `/league/${leagueKey}/teams${params}`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      teams: response.teams || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get league scoreboard/matchups
+   */
+  async getLeagueScoreboard(leagueKey: string, week?: string): Promise<{ matchups: Matchup[]; count: number }> {
+    const weekParam = week ? `;week=${week}` : '';
+    const endpoint = `/league/${leagueKey}/scoreboard${weekParam}`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      matchups: response.scoreboard?.matchups || [],
+      count: response.scoreboard?.count || 0,
+    };
+  }
+
+  /**
+   * Get league-wide statistics
+   */
+  async getLeagueStats(leagueKey: string): Promise<any> {
+    // Get league stats aggregated across all teams
+    return this.makeRequest<any>('GET', `/league/${leagueKey};out=stats`);
+  }
+
+  /**
+   * Get league transactions
+   */
+  async getLeagueTransactions(leagueKey: string, filters?: TransactionFilters): Promise<{ transactions: Transaction[]; count: number }> {
+    const params = this.buildTransactionFilterParams(filters);
+    const endpoint = `/league/${leagueKey}/transactions${params}`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      transactions: response.transactions || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get league players
+   */
+  async getLeaguePlayers(leagueKey: string, filters?: PlayerFilters): Promise<{ players: Player[]; count: number }> {
+    const params = this.buildPlayerFilterParams(filters);
+    const endpoint = `/league/${leagueKey}/players${params}`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      players: response.players || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get team details
+   */
+  async getTeam(teamKey: string, filters?: LeagueFilters): Promise<Team> {
+    const params = this.buildFilterParams(filters);
+    const endpoint = `/team/${teamKey}${params}`;
+    return this.makeRequest<Team>('GET', endpoint);
+  }
+
+  /**
+   * Get team statistics for specified coverage
+   */
+  async getTeamStats(
+    teamKey: string,
+    statType: 'season' | 'lastweek' | 'lastmonth' | 'date' | 'week' = 'season',
+    options?: { season?: string; week?: string; date?: string }
+  ): Promise<any> {
+    const params: string[] = [`type=${statType}`];
+    if (options?.season) params.push(`season=${options.season}`);
+    if (options?.week) params.push(`week=${options.week}`);
+    if (options?.date) params.push(`date=${options.date}`);
+    const suffix = params.length ? `;${params.join(';')}` : '';
+    return this.makeRequest<any>('GET', `/team/${teamKey}/stats${suffix}`);
+  }
+
+  /**
+   * Get team roster
+   */
+  async getTeamRoster(teamKey: string, week?: string): Promise<{ players: Player[]; count: number }> {
+    const weekParam = week ? `;week=${week}` : '';
+    const endpoint = `/team/${teamKey}/roster${weekParam}`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      players: response.roster?.players || [],
+      count: response.roster?.count || 0,
+    };
+  }
+
+  /**
+   * Get team matchups
+   */
+  async getTeamMatchups(teamKey: string, week?: string): Promise<{ matchups: Matchup[]; count: number }> {
+    const weekParam = week ? `;week=${week}` : '';
+    const endpoint = `/team/${teamKey}/matchups${weekParam}`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      matchups: response.matchups || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get detailed matchup information for a specific matchup
+   * Includes teams, rosters, stats, and scoring details
+   */
+  async getMatchupDetails(
+    leagueKey: string,
+    week?: string,
+    teamKeys?: string[]
+  ): Promise<{ matchups: Matchup[]; count: number }> {
+    const weekParam = week ? `;week=${week}` : '';
+    const teamKeysParam = teamKeys?.length ? `;team_keys=${teamKeys.join(',')}` : '';
+    // Use scoreboard with teams subresource to get detailed matchup info with rosters and stats
+    const endpoint = `/league/${leagueKey}/scoreboard${weekParam}${teamKeysParam};out=teams,roster,matchups,stats`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      matchups: response.scoreboard?.matchups || [],
+      count: response.scoreboard?.count || 0,
+    };
+  }
+
+  /**
+   * Get team transactions
+   */
+  async getTeamTransactions(teamKey: string, filters?: TransactionFilters): Promise<{ transactions: Transaction[]; count: number }> {
+    const params = this.buildTransactionFilterParams(filters);
+    const endpoint = `/team/${teamKey}/transactions${params}`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      transactions: response.transactions || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get player details
+   */
+  async getPlayer(playerKey: string): Promise<Player> {
+    return this.makeRequest<Player>('GET', `/player/${playerKey}`);
+  }
+
+  /**
+   * Get player stats
+   */
+  async getPlayerStats(
+    playerKey: string,
+    statType: 'season' | 'lastweek' | 'lastmonth' | 'date' | 'week' = 'season',
+    options?: { season?: string; week?: string; date?: string }
+  ): Promise<any> {
+    const params: string[] = [`type=${statType}`];
+    if (options?.season) params.push(`season=${options.season}`);
+    if (options?.week) params.push(`week=${options.week}`);
+    if (options?.date) params.push(`date=${options.date}`);
+    const suffix = params.length ? `;${params.join(';')}` : '';
+    return this.makeRequest<any>('GET', `/player/${playerKey}/stats${suffix}`);
+  }
+
+  /**
+   * Get player ownership within a league
+   */
+  async getPlayerOwnership(leagueKey: string, playerKey: string): Promise<any> {
+    const endpoint = `/league/${leagueKey}/players;player_keys=${playerKey}/ownership`;
+    return this.makeRequest<any>('GET', endpoint);
+  }
+
+  /**
+   * Get Yahoo editorial player notes
+   */
+  async getPlayerNotes(playerKey: string): Promise<any> {
+    return this.makeRequest<any>('GET', `/player/${playerKey}/notes`);
+  }
+
+  /**
+   * Search for players
+   */
+  async searchPlayers(
+    gameKey: string,
+    filters?: PlayerFilters
+  ): Promise<{ players: Player[]; count: number }> {
+    const params = this.buildPlayerFilterParams(filters);
+    const endpoint = `/games;game_keys=${gameKey}/players${params}`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      players: response.players || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Advanced player search by position within a league
+   */
+  async searchPlayersByPosition(
+    leagueKey: string,
+    position: string,
+    filters?: PlayerFilters
+  ): Promise<{ players: Player[]; count: number }> {
+    const params = this.buildPlayerFilterParams(filters);
+    const endpoint = `/league/${leagueKey}/players;position=${position}${params}`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      players: response.players || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Get players on injured reserve for a team
+   */
+  async getInjuredReserve(teamKey: string): Promise<{ players: Player[]; count: number }> {
+    // Get roster with IR players - typically shown via status
+    const endpoint = `/team/${teamKey}/roster`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    const allPlayers = response.roster?.players || [];
+    // Filter for injured/IR status players
+    const irPlayers = allPlayers.filter((p: Player) => 
+      p.status === 'IR' || 
+      p.status === 'PUP' || 
+      p.status === 'O' || 
+      p.status === 'D' ||
+      p.on_disabled_list === '1'
+    );
+    return {
+      players: irPlayers,
+      count: irPlayers.length,
+    };
+  }
+
+  /**
+   * Get available free agents
+   */
+  async getFreeAgents(
+    leagueKey: string,
+    position?: string,
+    status = 'A',
+    count = 25,
+    start = 0
+  ): Promise<{ players: Player[]; count: number }> {
+    const positionParam = position ? `;position=${position}` : '';
+    const endpoint = `/league/${leagueKey}/players${positionParam};status=${status};count=${count};start=${start}`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      players: response.players || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Add player to team
+   */
+  async addPlayer(leagueKey: string, teamKey: string, playerKey: string): Promise<Transaction> {
+    const xmlData = this.buildAddPlayerXML(playerKey, teamKey);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
+    return response.transaction;
+  }
+
+  /**
+   * Drop player from team
+   */
+  async dropPlayer(leagueKey: string, teamKey: string, playerKey: string): Promise<Transaction> {
+    const xmlData = this.buildDropPlayerXML(playerKey, teamKey);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
+    return response.transaction;
+  }
+
+  /**
+   * Add and drop players in one transaction
+   */
+  async addDropPlayers(
+    leagueKey: string,
+    teamKey: string,
+    addPlayerKey: string,
+    dropPlayerKey: string,
+    faabBid?: number
+  ): Promise<Transaction> {
+    const xmlData = this.buildAddDropPlayerXML(addPlayerKey, dropPlayerKey, teamKey, faabBid);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
+    return response.transaction;
+  }
+
+  /**
+   * Get pending waiver claims for a team
+   */
+  async getWaiverClaims(teamKey: string): Promise<{ transactions: Transaction[]; count: number }> {
+    const endpoint = `/team/${teamKey}/transactions;types=waiver`;
+    const response = await this.makeRequest<any>('GET', endpoint);
+    return {
+      transactions: response.transactions || [],
+      count: response.count || 0,
+    };
+  }
+
+  /**
+   * Propose a trade
+   */
+  async proposeTrade(
+    leagueKey: string,
+    traderTeamKey: string,
+    tradeeTeamKey: string,
+    players: Array<{ playerKey: string; sourceTeamKey: string; destinationTeamKey: string }>,
+    tradeNote?: string
+  ): Promise<Transaction> {
+    const xmlData = this.buildTradeXML(traderTeamKey, tradeeTeamKey, players, tradeNote);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
+    return response.transaction;
+  }
+
+  /**
+   * Accept a pending trade
+   */
+  async acceptTrade(
+    leagueKey: string,
+    transactionKey: string,
+    tradeNote?: string
+  ): Promise<Transaction> {
+    const xmlData = this.buildAcceptTradeXML(transactionKey, tradeNote);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
+    return response.transaction;
+  }
+
+  /**
+   * Reject a pending trade
+   */
+  async rejectTrade(
+    leagueKey: string,
+    transactionKey: string,
+    tradeNote?: string
+  ): Promise<Transaction> {
+    const xmlData = this.buildRejectTradeXML(transactionKey, tradeNote);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
+    return response.transaction;
+  }
+
+  /**
+   * Cancel a trade proposal
+   */
+  async cancelTrade(
+    leagueKey: string,
+    transactionKey: string
+  ): Promise<Transaction> {
+    const xmlData = this.buildCancelTradeXML(transactionKey);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
+    return response.transaction;
+  }
+
+  /**
+   * Vote on a trade (if league allows voting)
+   */
+  async voteOnTrade(
+    leagueKey: string,
+    transactionKey: string,
+    vote: 'allow' | 'veto'
+  ): Promise<Transaction> {
+    const xmlData = this.buildVoteTradeXML(transactionKey, vote);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
+    return response.transaction;
+  }
+
+  /**
+   * Cancel a waiver claim
+   */
+  async cancelWaiverClaim(
+    leagueKey: string,
+    transactionKey: string
+  ): Promise<Transaction> {
+    const xmlData = this.buildCancelWaiverXML(transactionKey);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
+    return response.transaction;
+  }
+
+  /**
+   * Edit a pending waiver claim
+   */
+  async editWaiverClaim(
+    leagueKey: string,
+    transactionKey: string,
+    faabBid: number,
+    priority?: number
+  ): Promise<Transaction> {
+    const xmlData = this.buildEditWaiverXML(transactionKey, faabBid, priority);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
+    return response.transaction;
+  }
+
+  /**
+   * Edit league settings (commissioner only)
+   * Update various league settings like draft time, waiver rules, trade settings, etc.
+   */
+  async editLeagueSettings(
+    leagueKey: string,
+    settings: {
+      draftTime?: string;
+      draftType?: string;
+      isAuctionDraft?: string;
+      waiverType?: string;
+      waiverTime?: string;
+      tradeEndDate?: string;
+      tradeRejectTime?: string;
+      postDraftPlayers?: string;
+      maxTeams?: string;
+      [key: string]: string | undefined;
+    }
+  ): Promise<LeagueSettings> {
+    const xmlData = this.buildEditLeagueSettingsXML(settings);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/settings`, xmlData);
+    return response.settings;
+  }
+
+  /**
+   * Manage team roster (commissioner only)
+   * Commissioner can add/drop players for any team in the league
+   */
+  async manageRoster(
+    leagueKey: string,
+    teamKey: string,
+    action: 'add' | 'drop' | 'add_drop',
+    players: {
+      addPlayerKey?: string;
+      dropPlayerKey?: string;
+    }
+  ): Promise<Transaction> {
+    const xmlData = this.buildManageRosterXML(action, teamKey, players);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
+    return response.transaction;
+  }
+
+  /**
+   * Process pending transactions (commissioner only)
+   * Commissioner can approve or reject pending transactions
+   */
+  async processTransaction(
+    leagueKey: string,
+    transactionKey: string,
+    action: 'approve' | 'reject',
+    note?: string
+  ): Promise<Transaction> {
+    const xmlData = this.buildProcessTransactionXML(transactionKey, action, note);
+    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
+    return response.transaction;
+  }
+
+  /**
+   * Edit team roster positions (commissioner only)
+   * Directly set player positions on a team's roster
+   */
+  async editTeamRoster(
+    leagueKey: string,
+    teamKey: string,
+    playerChanges: Array<{
+      playerKey: string;
+      position: string;
+    }>
+  ): Promise<any> {
+    const xmlData = this.buildEditTeamRosterXML(teamKey, playerChanges);
+    const response = await this.makeRequest<any>('POST', `/team/${teamKey}/roster`, xmlData);
+    return response.roster;
+  }
+
+  /**
+   * Build filter parameters for league requests
+   */
+  private buildFilterParams(filters?: LeagueFilters): string {
+    if (!filters) return '';
+
+    const params: string[] = [];
+
+    if (filters.game_keys?.length) {
+      params.push(`game_keys=${filters.game_keys.join(',')}`);
+    }
+    if (filters.league_keys?.length) {
+      params.push(`league_keys=${filters.league_keys.join(',')}`);
+    }
+    if (filters.team_keys?.length) {
+      params.push(`team_keys=${filters.team_keys.join(',')}`);
+    }
+    if (filters.player_keys?.length) {
+      params.push(`player_keys=${filters.player_keys.join(',')}`);
+    }
+
+    const outParams: string[] = [];
+    if (filters.draft_results) outParams.push('draft_results');
+    if (filters.draft_teams) outParams.push('draft_teams');
+    if (filters.players) outParams.push('players');
+    if (filters.stats) outParams.push('stats');
+    if (filters.standings) outParams.push('standings');
+    if (filters.rosters) outParams.push('rosters');
+    if (filters.matchups) outParams.push('matchups');
+    if (filters.scoreboard) outParams.push('scoreboard');
+    if (filters.transactions) outParams.push('transactions');
+    if (filters.settings) outParams.push('settings');
+    if (filters.metadata) outParams.push('metadata');
+
+    if (outParams.length) {
+      params.push(`out=${outParams.join(',')}`);
+    }
+
+    return params.length ? `;${params.join(';')}` : '';
+  }
+
+  /**
+   * Build filter parameters for player requests
+   */
+  private buildPlayerFilterParams(filters?: PlayerFilters): string {
+    if (!filters) return '';
+
+    const params: string[] = [];
+
+    if (filters.position) {
+      params.push(`position=${filters.position}`);
+    }
+    if (filters.status) {
+      params.push(`status=${filters.status}`);
+    }
+    if (filters.search) {
+      params.push(`search=${encodeURIComponent(filters.search)}`);
+    }
+    if (filters.sort) {
+      params.push(`sort=${filters.sort}`);
+    }
+    if (filters.sort_type) {
+      params.push(`sort_type=${filters.sort_type}`);
+    }
+    if (filters.sort_season) {
+      params.push(`sort_season=${filters.sort_season}`);
+    }
+    if (filters.sort_week) {
+      params.push(`sort_week=${filters.sort_week}`);
+    }
+    if (filters.count) {
+      params.push(`count=${filters.count}`);
+    }
+    if (filters.start) {
+      params.push(`start=${filters.start}`);
+    }
+
+    return params.length ? `;${params.join(';')}` : '';
+  }
+
+  /**
+   * Build filter parameters for transaction requests
+   */
+  private buildTransactionFilterParams(filters?: TransactionFilters): string {
+    if (!filters) return '';
+
+    const params: string[] = [];
+
+    if (filters.type) {
+      params.push(`type=${filters.type}`);
+    }
+    if (filters.types?.length) {
+      params.push(`types=${filters.types.join(',')}`);
+    }
+    if (filters.team_key) {
+      params.push(`team_key=${filters.team_key}`);
+    }
+    if (filters.count) {
+      params.push(`count=${filters.count}`);
+    }
+
+    return params.length ? `;${params.join(';')}` : '';
+  }
+
+  /**
+   * Build XML for adding a player
+   */
+  private buildAddPlayerXML(playerKey: string, teamKey: string): string {
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <type>add</type>
+    <player>
+      <player_key>${playerKey}</player_key>
+      <transaction_data>
+        <type>add</type>
+        <destination_team_key>${teamKey}</destination_team_key>
+      </transaction_data>
+    </player>
+  </transaction>
+</fantasy_content>`;
+  }
+
+  /**
+   * Build XML for dropping a player
+   */
+  private buildDropPlayerXML(playerKey: string, teamKey: string): string {
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <type>drop</type>
+    <player>
+      <player_key>${playerKey}</player_key>
+      <transaction_data>
+        <type>drop</type>
+        <source_team_key>${teamKey}</source_team_key>
+      </transaction_data>
+    </player>
+  </transaction>
+</fantasy_content>`;
+  }
+
+  /**
+   * Build XML for add/drop transaction
+   */
+  private buildAddDropPlayerXML(
+    addPlayerKey: string,
+    dropPlayerKey: string,
+    teamKey: string,
+    faabBid?: number
+  ): string {
+    const faabBidXML = faabBid ? `    <faab_bid>${faabBid}</faab_bid>\n` : '';
+    
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <type>add/drop</type>
+${faabBidXML}    <players>
+      <player>
+        <player_key>${addPlayerKey}</player_key>
+        <transaction_data>
+          <type>add</type>
+          <destination_team_key>${teamKey}</destination_team_key>
+        </transaction_data>
+      </player>
+      <player>
+        <player_key>${dropPlayerKey}</player_key>
+        <transaction_data>
+          <type>drop</type>
+          <source_team_key>${teamKey}</source_team_key>
+        </transaction_data>
+      </player>
+    </players>
+  </transaction>
+</fantasy_content>`;
+  }
+
+  /**
+   * Build XML for trade proposal
+   */
+  private buildTradeXML(
+    traderTeamKey: string,
+    tradeeTeamKey: string,
+    players: Array<{ playerKey: string; sourceTeamKey: string; destinationTeamKey: string }>,
+    tradeNote?: string
+  ): string {
+    const tradeNoteXML = tradeNote ? `    <trade_note>${tradeNote}</trade_note>\n` : '';
+    const playersXML = players.map(player => `      <player>
+        <player_key>${player.playerKey}</player_key>
+        <transaction_data>
+          <type>pending_trade</type>
+          <source_team_key>${player.sourceTeamKey}</source_team_key>
+          <destination_team_key>${player.destinationTeamKey}</destination_team_key>
+        </transaction_data>
+      </player>`).join('\n');
+
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <type>pending_trade</type>
+    <trader_team_key>${traderTeamKey}</trader_team_key>
+    <tradee_team_key>${tradeeTeamKey}</tradee_team_key>
+${tradeNoteXML}    <players>
+${playersXML}
+    </players>
+  </transaction>
+</fantasy_content>`;
+  }
+
+  /**
+   * Build XML for accepting a trade
+   */
+  private buildAcceptTradeXML(transactionKey: string, tradeNote?: string): string {
+    const tradeNoteXML = tradeNote ? `    <trade_note>${tradeNote}</trade_note>\n` : '';
+    
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <transaction_key>${transactionKey}</transaction_key>
+    <type>pending_trade</type>
+    <action>accept</action>
+${tradeNoteXML}  </transaction>
+</fantasy_content>`;
+  }
+
+  /**
+   * Build XML for rejecting a trade
+   */
+  private buildRejectTradeXML(transactionKey: string, tradeNote?: string): string {
+    const tradeNoteXML = tradeNote ? `    <trade_note>${tradeNote}</trade_note>\n` : '';
+    
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <transaction_key>${transactionKey}</transaction_key>
+    <type>pending_trade</type>
+    <action>reject</action>
+${tradeNoteXML}  </transaction>
+</fantasy_content>`;
+  }
+
+  /**
+   * Build XML for canceling a trade
+   */
+  private buildCancelTradeXML(transactionKey: string): string {
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <transaction_key>${transactionKey}</transaction_key>
+    <type>pending_trade</type>
+    <action>cancel</action>
+  </transaction>
+</fantasy_content>`;
+  }
+
+  /**
+   * Build XML for voting on a trade
+   */
+  private buildVoteTradeXML(transactionKey: string, vote: 'allow' | 'veto'): string {
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <transaction_key>${transactionKey}</transaction_key>
+    <type>pending_trade</type>
+    <action>vote</action>
+    <vote>${vote}</vote>
+  </transaction>
+</fantasy_content>`;
+  }
+
+  /**
+   * Build XML for canceling a waiver claim
+   */
+  private buildCancelWaiverXML(transactionKey: string): string {
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <transaction_key>${transactionKey}</transaction_key>
+    <type>waiver</type>
+    <action>cancel</action>
+  </transaction>
+</fantasy_content>`;
+  }
+
+  /**
+   * Build XML for editing a waiver claim
+   */
+  private buildEditWaiverXML(transactionKey: string, faabBid: number, priority?: number): string {
+    const priorityXML = priority !== undefined ? `    <priority>${priority}</priority>\n` : '';
+    
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <transaction_key>${transactionKey}</transaction_key>
+    <type>waiver</type>
+    <action>edit</action>
+    <faab_bid>${faabBid}</faab_bid>
+${priorityXML}  </transaction>
+</fantasy_content>`;
+  }
+
+  /**
+   * Build XML for editing league settings (commissioner only)
+   */
+  private buildEditLeagueSettingsXML(settings: { [key: string]: string | undefined }): string {
+    const settingsXML = Object.entries(settings)
+      .filter(([_, value]) => value !== undefined)
+      .map(([key, value]) => {
+        // Convert camelCase to snake_case for Yahoo API
+        const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+        return `    <${snakeKey}>${value}</${snakeKey}>`;
+      })
+      .join('\n');
+
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <league>
+    <league_key>${settings.leagueKey}</league_key>
+    <settings>
+${settingsXML}
+    </settings>
+  </league>
+</fantasy_content>`;
+  }
+
+  /**
+   * Build XML for managing roster (commissioner only)
+   */
+  private buildManageRosterXML(
+    action: 'add' | 'drop' | 'add_drop',
+    teamKey: string,
+    players: { addPlayerKey?: string; dropPlayerKey?: string }
+  ): string {
+    if (action === 'add' && players.addPlayerKey) {
+      return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <type>add</type>
+    <is_commissioner_action>1</is_commissioner_action>
+    <player>
+      <player_key>${players.addPlayerKey}</player_key>
+      <transaction_data>
+        <type>add</type>
+        <destination_team_key>${teamKey}</destination_team_key>
+      </transaction_data>
+    </player>
+  </transaction>
+</fantasy_content>`;
+    } else if (action === 'drop' && players.dropPlayerKey) {
+      return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <type>drop</type>
+    <is_commissioner_action>1</is_commissioner_action>
+    <player>
+      <player_key>${players.dropPlayerKey}</player_key>
+      <transaction_data>
+        <type>drop</type>
+        <source_team_key>${teamKey}</source_team_key>
+      </transaction_data>
+    </player>
+  </transaction>
+</fantasy_content>`;
+    } else if (action === 'add_drop' && players.addPlayerKey && players.dropPlayerKey) {
+      return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <type>add/drop</type>
+    <is_commissioner_action>1</is_commissioner_action>
+    <players>
+      <player>
+        <player_key>${players.addPlayerKey}</player_key>
+        <transaction_data>
+          <type>add</type>
+          <destination_team_key>${teamKey}</destination_team_key>
+        </transaction_data>
+      </player>
+      <player>
+        <player_key>${players.dropPlayerKey}</player_key>
+        <transaction_data>
+          <type>drop</type>
+          <source_team_key>${teamKey}</source_team_key>
+        </transaction_data>
+      </player>
+    </players>
+  </transaction>
+</fantasy_content>`;
+    }
+    throw new Error(`Invalid action or missing player keys for ${action}`);
+  }
+
+  /**
+   * Build XML for processing transactions (commissioner only)
+   */
+  private buildProcessTransactionXML(transactionKey: string, action: 'approve' | 'reject', note?: string): string {
+    const noteXML = note ? `    <note>${note}</note>\n` : '';
+    
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <transaction>
+    <transaction_key>${transactionKey}</transaction_key>
+    <action>${action}</action>
+    <is_commissioner_action>1</is_commissioner_action>
+${noteXML}  </transaction>
+</fantasy_content>`;
+  }
+
+  /**
+   * Build XML for editing team roster (commissioner only)
+   */
+  private buildEditTeamRosterXML(
+    teamKey: string,
+    playerChanges: Array<{ playerKey: string; position: string }>
+  ): string {
+    const playersXML = playerChanges.map(change => `      <player>
+        <player_key>${change.playerKey}</player_key>
+        <position>${change.position}</position>
+      </player>`).join('\n');
+
+    return `<?xml version='1.0'?>
+<fantasy_content>
+  <roster>
+    <coverage_type>date</coverage_type>
+    <date>${new Date().toISOString().split('T')[0]}</date>
+    <is_commissioner_action>1</is_commissioner_action>
+    <players>
+${playersXML}
+    </players>
+  </roster>
+</fantasy_content>`;
+  }
+}
