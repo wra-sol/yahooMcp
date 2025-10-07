@@ -147,15 +147,17 @@ export class YahooFantasyClient {
       }
     }
 
-    const url = `${this.baseUrl}${endpoint}`;
+    // Yahoo Fantasy API supports JSON format via ?format=json parameter
+    const separator = endpoint.includes('?') ? '&' : '?';
+    const url = `${this.baseUrl}${endpoint}${separator}format=json`;
     const authHeader = this.oauthClient.createAuthHeader(method, url, data);
 
     const fetchOptions: RequestInit = {
       method,
       headers: {
         ...authHeader,
-        'Content-Type': 'application/xml',
-        'Accept': 'application/xml',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
       },
     };
 
@@ -167,6 +169,22 @@ export class YahooFantasyClient {
       const response = await fetch(url, fetchOptions);
       
       if (!response.ok) {
+        // Try to get error details from response
+        const contentType = response.headers.get('content-type');
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        
+        try {
+          const errorText = await response.text();
+          if (contentType?.includes('application/json')) {
+            const errorData = JSON.parse(errorText);
+            errorMessage += ` - ${JSON.stringify(errorData)}`;
+          } else {
+            errorMessage += ` - ${errorText.substring(0, 200)}`;
+          }
+        } catch (e) {
+          // Ignore parsing errors for error messages
+        }
+        
         if (response.status === 401 && retryCount < 1) {
           // Token expired, try to refresh and retry once
           const credentials = this.oauthClient.getCredentials();
@@ -181,13 +199,28 @@ export class YahooFantasyClient {
         } else if (response.status === 401) {
           throw new Error('Authentication failed after token refresh. Please re-authenticate.');
         }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(errorMessage);
       }
 
-      const responseData: YahooApiResponse<T> = await response.json();
+      // Parse JSON response
+      const contentType = response.headers.get('content-type');
+      const responseText = await response.text();
+      
+      // Check if we actually got JSON
+      if (!contentType?.includes('application/json') && !responseText.trim().startsWith('{')) {
+        console.error('⚠️  Received non-JSON response:');
+        console.error('   Content-Type:', contentType);
+        console.error('   Response preview:', responseText.substring(0, 200));
+        throw new Error(`Expected JSON but received ${contentType}. Response: ${responseText.substring(0, 100)}`);
+      }
+      
+      const responseData: YahooApiResponse<T> = JSON.parse(responseText);
       return responseData.fantasy_content;
     } catch (error: any) {
       if (error.message.includes('Authentication failed')) {
+        throw error;
+      }
+      if (error.message.includes('Expected JSON')) {
         throw error;
       }
       throw new Error(`API request failed: ${error.message}`);
