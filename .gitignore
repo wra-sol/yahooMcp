@@ -8,6 +8,10 @@ yarn-error.log*
 dist/
 build/
 
+# Compiled executables
+yahoo-mcp
+yahoo-mcp-*
+
 # Environment variables
 .env
 .env.local
