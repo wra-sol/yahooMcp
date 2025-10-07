@@ -3,6 +3,7 @@ import { OAuthCredentials } from '../types/index.js';
 import { writeFile, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
+import { YahooFantasyMcpServer } from './mcp-server.js';
 
 export class HttpOAuthServer {
   private server?: ReturnType<typeof Bun.serve>;
@@ -11,6 +12,7 @@ export class HttpOAuthServer {
   private requestTokenStore: Map<string, { token: string; secret: string }> = new Map();
   private port: number;
   private tokenFilePath: string;
+  private mcpServer?: YahooFantasyMcpServer;
 
   constructor(credentials: OAuthCredentials, port: number = 3000) {
     this.credentials = credentials;
@@ -19,9 +21,29 @@ export class HttpOAuthServer {
     this.tokenFilePath = path.join(process.cwd(), '.oauth-tokens.json');
   }
 
+  /**
+   * Set the MCP server instance for SSE endpoint
+   */
+  setMcpServer(mcpServer: YahooFantasyMcpServer): void {
+    this.mcpServer = mcpServer;
+  }
+
   private async handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const pathname = url.pathname;
+
+    // Handle CORS preflight
+    if (req.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Max-Age': '86400',
+        },
+      });
+    }
 
     // Route: Home page
     if (pathname === '/' && req.method === 'GET') {
@@ -41,6 +63,16 @@ export class HttpOAuthServer {
     // Route: Health check
     if (pathname === '/health' && req.method === 'GET') {
       return this.handleHealthCheck();
+    }
+
+    // Route: MCP SSE endpoint
+    if (pathname === '/mcp' && req.method === 'GET') {
+      return this.handleMcpSSE(req);
+    }
+
+    // Route: MCP POST endpoint (for sending messages)
+    if (pathname === '/mcp/message' && req.method === 'POST') {
+      return this.handleMcpMessage(req);
     }
 
     // 404 Not Found
@@ -152,7 +184,18 @@ OAUTH_CALLBACK_URL=${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.
               <li><code>GET /oauth/start</code> - Start OAuth flow</li>
               <li><code>GET /oauth/callback</code> - OAuth callback (automatic)</li>
               <li><code>GET /health</code> - Health check</li>
+              <li><code>GET /mcp</code> - MCP SSE endpoint (for n8n, AI agents)</li>
+              <li><code>POST /mcp/message</code> - MCP message endpoint</li>
             </ul>
+            
+            <h2>n8n Integration</h2>
+            <p>To use this with n8n MCP Client:</p>
+            <ol>
+              <li>Add an MCP Client node in your n8n workflow</li>
+              <li>Set Connection Type to <strong>Server-Sent Events (SSE)</strong></li>
+              <li>Set Server URL to <code>${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp</code></li>
+              <li>Use the available operations (List Tools, Execute Tool, etc.)</li>
+            </ol>
           </div>
         </body>
       </html>
@@ -343,11 +386,131 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       authenticated: !!(this.credentials.accessToken && this.credentials.accessTokenSecret),
       timestamp: new Date().toISOString(),
       server: 'Bun native HTTP',
+      mcpEnabled: !!this.mcpServer,
+      mcpEndpoint: this.mcpServer ? '/mcp' : null,
     };
 
     return new Response(JSON.stringify(data, null, 2), {
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  /**
+   * Handle MCP SSE endpoint for Server-Sent Events
+   */
+  private async handleMcpSSE(req: Request): Promise<Response> {
+    if (!this.mcpServer) {
+      return new Response(JSON.stringify({ error: 'MCP server not initialized' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (!this.credentials.accessToken || !this.credentials.accessTokenSecret) {
+      return new Response(JSON.stringify({ error: 'Not authenticated with Yahoo' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Create SSE stream
+    const stream = new ReadableStream({
+      start: async (controller) => {
+        try {
+          // Send initial connection event
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode('event: endpoint\n'));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ endpoint: '/mcp/message' })}\n\n`));
+          
+          // Keep connection alive with periodic pings
+          const pingInterval = setInterval(() => {
+            try {
+              controller.enqueue(encoder.encode(': ping\n\n'));
+            } catch (e) {
+              clearInterval(pingInterval);
+            }
+          }, 30000);
+
+          // Handle connection close
+          req.signal.addEventListener('abort', () => {
+            clearInterval(pingInterval);
+            try {
+              controller.close();
+            } catch (e) {
+              // Already closed
+            }
+          });
+        } catch (error: any) {
+          console.error('SSE error:', error);
+          controller.error(error);
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      },
+    });
+  }
+
+  /**
+   * Handle MCP message POST endpoint
+   */
+  private async handleMcpMessage(req: Request): Promise<Response> {
+    if (!this.mcpServer) {
+      return new Response(JSON.stringify({ error: 'MCP server not initialized' }), {
+        status: 503,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
+    if (!this.credentials.accessToken || !this.credentials.accessTokenSecret) {
+      return new Response(JSON.stringify({ error: 'Not authenticated with Yahoo' }), {
+        status: 401,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
+    try {
+      const message = await req.json();
+      
+      // Handle the JSON-RPC request directly
+      const result = await this.mcpServer.handleJsonRpcRequest(message);
+
+      return new Response(JSON.stringify(result), {
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        },
+      });
+    } catch (error: any) {
+      console.error('MCP message error:', error);
+      return new Response(JSON.stringify({ 
+        error: error.message || 'Internal server error',
+        jsonrpc: '2.0',
+        id: null,
+      }), {
+        status: 500,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
   }
 
   private async saveTokens(tokens: {

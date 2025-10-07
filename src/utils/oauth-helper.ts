@@ -48,20 +48,14 @@ export class OAuthHelper {
   }
 
   /**
-   * Refresh access token using session handle
+   * Refresh access token using refresh token (OAuth 2.0)
    */
   async refreshAccessToken(
-    accessToken: string,
-    accessTokenSecret: string,
-    sessionHandle: string
+    refreshToken: string
   ): Promise<OAuthAccessTokenResponse> {
     try {
       console.log('Refreshing access token...');
-      return await this.oauthClient.refreshAccessToken(
-        accessToken,
-        accessTokenSecret,
-        sessionHandle
-      );
+      return await this.oauthClient.refreshAccessToken(refreshToken);
     } catch (error: any) {
       throw new Error(`Token refresh failed: ${error.message}`);
     }

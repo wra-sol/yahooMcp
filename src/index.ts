@@ -55,6 +55,7 @@ async function main() {
 
   const port = parseInt(process.env.PORT || '3000', 10);
   const httpMode = process.env.HTTP_MODE === 'true' || !credentials.accessToken;
+  const useStdio = process.env.USE_STDIO === 'true';
 
   try {
     // Start HTTP server for OAuth (always runs)
@@ -72,7 +73,20 @@ async function main() {
       const tokenSaveCallback = httpServer.getTokenSaveCallback();
       
       const mcpServer = new YahooFantasyMcpServer(updatedCredentials, tokenSaveCallback);
-      await mcpServer.start();
+      
+      // Set MCP server on HTTP server for SSE endpoint
+      httpServer.setMcpServer(mcpServer);
+      
+      if (useStdio) {
+        // Use stdio transport (for local MCP clients like Cursor/Claude Desktop)
+        await mcpServer.start();
+        console.error('   MCP available via: stdio');
+      } else {
+        // Use SSE transport via HTTP (for remote clients like n8n)
+        console.error('   MCP available via: HTTP/SSE');
+        console.error(`   MCP Endpoint: http://localhost:${port}/mcp`);
+        console.error(`   Message Endpoint: http://localhost:${port}/mcp/message`);
+      }
     } else {
       console.error('');
       console.error('⚠️  No OAuth tokens found.');

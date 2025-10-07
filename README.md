@@ -12,6 +12,8 @@ A comprehensive Model Context Protocol (MCP) server providing full access to the
 - **OAuth 1.0a Authentication**: Secure authentication with automatic token refresh
 - **Full TypeScript Support**: Comprehensive type definitions for all endpoints
 - **MCP Protocol Compliant**: Standard implementation for seamless AI assistant integration
+- **Multiple Transport Modes**: stdio (local) and HTTP/SSE (remote) support
+- **n8n Integration**: Works with n8n MCP Client for workflow automation
 - **Multi-Sport Support**: NFL, MLB, NBA, and NHL fantasy leagues
 - **Transaction Management**: Add/drop players, trades, waivers, and FAAB bidding
 - **Commissioner Tools**: League settings, roster management, transaction processing
@@ -23,6 +25,7 @@ A comprehensive Model Context Protocol (MCP) server providing full access to the
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Authentication Setup](#authentication-setup)
+- [n8n Integration](#n8n-integration)
 - [Usage Examples](#usage-examples)
 - [API Reference](#api-reference)
 - [Available Tools](#available-tools)
@@ -127,9 +130,19 @@ Once authenticated, restart the server:
 bun start
 ```
 
-The server runs in two modes simultaneously:
-- **HTTP Server** (port 3000): OAuth management and health checks
-- **MCP Server** (stdio): AI assistant integration via Model Context Protocol
+The server runs in dual mode:
+- **HTTP Server** (port 3000): OAuth management, health checks, and MCP endpoints
+- **MCP Protocol**: Available via both stdio (local) and HTTP/SSE (remote)
+
+### 5. Integration Options
+
+**For Local MCP Clients (Cursor, Claude Desktop):**
+- Set `USE_STDIO=true` environment variable
+- Configure client to use stdio transport
+
+**For Remote Clients (n8n, web apps):**
+- Use HTTP/SSE endpoints at `/mcp` and `/mcp/message`
+- See [n8n Setup Guide](N8N_SETUP.md) for detailed instructions
 
 ## 🔐 Authentication Setup
 
@@ -184,6 +197,28 @@ Tokens can be refreshed using the session handle:
 ```typescript
 await oauthClient.refreshAccessToken(sessionHandle);
 ```
+
+## 🔗 n8n Integration
+
+The Yahoo Fantasy MCP server supports **n8n workflow automation** via HTTP/SSE transport.
+
+### Quick n8n Setup
+
+1. **Deploy your server** (Railway, Heroku, etc.) or run locally
+2. **Authenticate** via the web interface
+3. **Add MCP Client node** in n8n
+4. **Configure**:
+   - Connection Type: `Server-Sent Events (SSE)`
+   - Server URL: `https://your-server.com/mcp`
+
+### Example n8n Workflows
+
+- **Automated Waiver Wire**: Runs nightly to pick up top free agents
+- **League Monitor**: Weekly standings reports via email/Slack
+- **Trade Analyzer**: Evaluate trades using player stats
+- **Lineup Optimizer**: Set optimal lineups based on matchups
+
+📖 **Full Guide**: See [N8N_SETUP.md](N8N_SETUP.md) for complete n8n integration instructions and workflow examples.
 
 ## 📚 Usage Examples
 
@@ -656,6 +691,7 @@ bun test
 | `OAUTH_CALLBACK_URL` | ⚠️ Recommended | OAuth redirect URI (default: `http://localhost:3000/oauth/callback`) |
 | `PORT` | ❌ No | HTTP server port (default: 3000) |
 | `HTTP_MODE` | ❌ No | Set to `true` to run HTTP-only (no MCP) |
+| `USE_STDIO` | ❌ No | Set to `true` for stdio transport (for Cursor/Claude Desktop) |
 | `YAHOO_ACCESS_TOKEN` | ❌ No | Auto-generated during OAuth |
 | `YAHOO_ACCESS_TOKEN_SECRET` | ❌ No | Auto-generated during OAuth |
 | `YAHOO_SESSION_HANDLE` | ❌ No | Auto-generated during OAuth |
