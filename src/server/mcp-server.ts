@@ -12,10 +12,12 @@ export class YahooFantasyMcpServer {
   private server: Server;
   private fantasyTools: FantasyTools;
   private credentials: OAuthCredentials;
+  private tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>;
 
-  constructor(credentials: OAuthCredentials) {
+  constructor(credentials: OAuthCredentials, tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>) {
     this.credentials = credentials;
-    this.fantasyTools = new FantasyTools(credentials);
+    this.tokenSaveCallback = tokenSaveCallback;
+    this.fantasyTools = new FantasyTools(credentials, tokenSaveCallback);
     
     this.server = new Server(
       {

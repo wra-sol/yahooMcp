@@ -67,7 +67,11 @@ async function main() {
     if (!httpMode && updatedCredentials.accessToken) {
       // Start MCP server if we have tokens and not in HTTP-only mode
       console.error('🚀 Starting MCP server...');
-      const mcpServer = new YahooFantasyMcpServer(updatedCredentials);
+      
+      // Get token save callback from HTTP server for automatic token persistence
+      const tokenSaveCallback = httpServer.getTokenSaveCallback();
+      
+      const mcpServer = new YahooFantasyMcpServer(updatedCredentials, tokenSaveCallback);
       await mcpServer.start();
     } else {
       console.error('');

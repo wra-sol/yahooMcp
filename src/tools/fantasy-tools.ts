@@ -52,9 +52,9 @@ const TransactionFiltersSchema = z.object({
 export class FantasyTools {
   private client: YahooFantasyClient;
 
-  constructor(credentials: OAuthCredentials) {
+  constructor(credentials: OAuthCredentials, tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>) {
     OAuthCredentialsSchema.parse(credentials);
-    this.client = new YahooFantasyClient(credentials);
+    this.client = new YahooFantasyClient(credentials, tokenSaveCallback);
   }
 
   /**
@@ -62,6 +62,13 @@ export class FantasyTools {
    */
   updateCredentials(credentials: Partial<OAuthCredentials>): void {
     this.client.updateCredentials(credentials);
+  }
+
+  /**
+   * Set token save callback
+   */
+  setTokenSaveCallback(callback: (credentials: OAuthCredentials) => Promise<void>): void {
+    this.client.setTokenSaveCallback(callback);
   }
 
   /**

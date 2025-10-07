@@ -22,9 +22,13 @@ import {
 export class YahooFantasyClient {
   private oauthClient: YahooOAuthClient;
   private baseUrl = 'https://fantasysports.yahooapis.com/fantasy/v2';
+  private tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>;
+  private isRefreshing = false;
+  private refreshPromise?: Promise<void>;
 
-  constructor(credentials: OAuthCredentials) {
+  constructor(credentials: OAuthCredentials, tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>) {
     this.oauthClient = new YahooOAuthClient(credentials);
+    this.tokenSaveCallback = tokenSaveCallback;
   }
 
   /**
@@ -35,15 +39,113 @@ export class YahooFantasyClient {
   }
 
   /**
+   * Set token save callback
+   */
+  setTokenSaveCallback(callback: (credentials: OAuthCredentials) => Promise<void>): void {
+    this.tokenSaveCallback = callback;
+  }
+
+  /**
+   * Check if token needs refresh (within 5 minutes of expiration)
+   */
+  private needsTokenRefresh(): boolean {
+    const credentials = this.oauthClient.getCredentials();
+    
+    if (!credentials.tokenExpiresAt) {
+      // No expiration info, don't proactively refresh
+      return false;
+    }
+
+    const now = Date.now();
+    const fiveMinutes = 5 * 60 * 1000;
+    
+    // Refresh if token expires within 5 minutes
+    return now >= (credentials.tokenExpiresAt - fiveMinutes);
+  }
+
+  /**
+   * Refresh access token using session handle
+   */
+  private async refreshToken(): Promise<void> {
+    // If already refreshing, wait for that to complete
+    if (this.isRefreshing && this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.isRefreshing = true;
+    this.refreshPromise = (async () => {
+      try {
+        const credentials = this.oauthClient.getCredentials();
+        
+        if (!credentials.sessionHandle) {
+          throw new Error('No session handle available for token refresh. Please re-authenticate.');
+        }
+
+        if (!credentials.accessToken || !credentials.accessTokenSecret) {
+          throw new Error('No access token available. Please authenticate first.');
+        }
+
+        console.error('🔄 Refreshing access token...');
+        
+        const newTokens = await this.oauthClient.refreshAccessToken(
+          credentials.accessToken,
+          credentials.accessTokenSecret,
+          credentials.sessionHandle
+        );
+
+        // Calculate token expiration time
+        const now = Date.now();
+        const expiresIn = newTokens.oauth_expires_in ? parseInt(newTokens.oauth_expires_in) * 1000 : 3600 * 1000; // Default 1 hour
+        const tokenExpiresAt = now + expiresIn;
+
+        // Update credentials with new tokens and expiration info
+        const updatedCredentials: OAuthCredentials = {
+          ...credentials,
+          accessToken: newTokens.oauth_token,
+          accessTokenSecret: newTokens.oauth_token_secret,
+          sessionHandle: newTokens.oauth_session_handle || credentials.sessionHandle,
+          tokenExpiresAt,
+          tokenRefreshedAt: now,
+        };
+
+        this.oauthClient.updateCredentials(updatedCredentials);
+
+        // Save tokens if callback is provided
+        if (this.tokenSaveCallback) {
+          await this.tokenSaveCallback(updatedCredentials);
+        }
+
+        console.error('✅ Access token refreshed successfully');
+        console.error(`   Token expires at: ${new Date(tokenExpiresAt).toISOString()}`);
+      } finally {
+        this.isRefreshing = false;
+        this.refreshPromise = undefined;
+      }
+    })();
+
+    return this.refreshPromise;
+  }
+
+  /**
    * Make authenticated request to Yahoo Fantasy API
    */
   private async makeRequest<T>(
     method: 'GET' | 'POST',
     endpoint: string,
-    data?: any
+    data?: any,
+    retryCount = 0
   ): Promise<T> {
     if (!this.oauthClient.hasValidAccessToken()) {
       throw new Error('No valid access token available. Please authenticate first.');
+    }
+
+    // Proactively refresh token if it's close to expiration
+    if (this.needsTokenRefresh() && !this.isRefreshing) {
+      const credentials = this.oauthClient.getCredentials();
+      if (credentials.sessionHandle) {
+        console.error('⏰ Token expiring soon, proactively refreshing...');
+        await this.refreshToken();
+      }
     }
 
     const url = `${this.baseUrl}${endpoint}`;
@@ -66,8 +168,19 @@ export class YahooFantasyClient {
       const response = await fetch(url, fetchOptions);
       
       if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error('Authentication failed. Please re-authenticate.');
+        if (response.status === 401 && retryCount < 1) {
+          // Token expired, try to refresh and retry once
+          const credentials = this.oauthClient.getCredentials();
+          if (credentials.sessionHandle) {
+            console.error('⚠️  Authentication failed (401), attempting token refresh...');
+            await this.refreshToken();
+            // Retry the request with new token
+            return this.makeRequest<T>(method, endpoint, data, retryCount + 1);
+          } else {
+            throw new Error('Authentication failed. No session handle available for token refresh. Please re-authenticate.');
+          }
+        } else if (response.status === 401) {
+          throw new Error('Authentication failed after token refresh. Please re-authenticate.');
         }
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }

@@ -370,6 +370,8 @@ export interface OAuthCredentials {
   accessToken?: string;
   accessTokenSecret?: string;
   sessionHandle?: string;
+  tokenExpiresAt?: number; // Unix timestamp in milliseconds
+  tokenRefreshedAt?: number; // Unix timestamp in milliseconds
 }
 
 export interface OAuthTokenResponse {
