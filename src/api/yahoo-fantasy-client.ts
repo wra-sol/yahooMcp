@@ -87,9 +87,8 @@ export class YahooFantasyClient {
 
         console.error('🔄 Refreshing access token...');
         
+        // OAuth 2.0 uses refresh token (stored in sessionHandle)
         const newTokens = await this.oauthClient.refreshAccessToken(
-          credentials.accessToken,
-          credentials.accessTokenSecret,
           credentials.sessionHandle
         );
 

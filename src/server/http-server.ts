@@ -169,17 +169,17 @@ OAUTH_CALLBACK_URL=${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.
       const callbackUrl = process.env.OAUTH_CALLBACK_URL || 
                          `http://localhost:${this.port}/oauth/callback`;
       
-      // Get request token
-      const requestToken = await this.oauthClient.getRequestToken(callbackUrl);
+      // Get authorization URL (OAuth 2.0 - no request token needed)
+      const authUrl = this.oauthClient.getAuthorizationUrl(callbackUrl);
       
-      // Store request token for callback
-      this.requestTokenStore.set(requestToken.oauth_token, {
-        token: requestToken.oauth_token,
-        secret: requestToken.oauth_token_secret,
-      });
-      
-      // Get authorization URL
-      const authUrl = this.oauthClient.getAuthorizationUrl(requestToken.oauth_token);
+      // Store state for CSRF verification
+      const state = this.credentials.state;
+      if (state) {
+        this.requestTokenStore.set(state, {
+          token: state,
+          secret: '',
+        });
+      }
       
       // Redirect to Yahoo authorization
       return Response.redirect(authUrl, 302);
@@ -198,25 +198,32 @@ OAUTH_CALLBACK_URL=${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.
 
   private async handleOAuthCallback(url: URL): Promise<Response> {
     try {
-      const oauth_token = url.searchParams.get('oauth_token');
-      const oauth_verifier = url.searchParams.get('oauth_verifier');
+      // OAuth 2.0 callback parameters
+      const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
+      const error = url.searchParams.get('error');
       
-      if (!oauth_token || !oauth_verifier) {
-        throw new Error('Missing OAuth parameters');
+      // Check for OAuth error
+      if (error) {
+        throw new Error(`OAuth error: ${error}`);
       }
       
-      // Retrieve stored request token
-      const storedToken = this.requestTokenStore.get(oauth_token);
-      if (!storedToken) {
-        throw new Error('Invalid or expired request token');
+      if (!code || !state) {
+        throw new Error('Missing OAuth parameters (code or state)');
       }
       
-      // Exchange for access token
-      const accessToken = await this.oauthClient.getAccessToken(
-        storedToken.token,
-        storedToken.secret,
-        oauth_verifier
-      );
+      // Verify state parameter for CSRF protection
+      const storedState = this.requestTokenStore.get(state);
+      if (!storedState) {
+        throw new Error('Invalid or expired state parameter');
+      }
+      
+      // Determine callback URL
+      const callbackUrl = process.env.OAUTH_CALLBACK_URL || 
+                         `http://localhost:${this.port}/oauth/callback`;
+      
+      // Exchange authorization code for access token
+      const accessToken = await this.oauthClient.getAccessToken(code, callbackUrl, state);
       
       // Calculate token expiration
       const now = Date.now();
@@ -239,8 +246,8 @@ OAUTH_CALLBACK_URL=${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.
         tokenRefreshedAt: now,
       });
       
-      // Clean up request token
-      this.requestTokenStore.delete(oauth_token);
+      // Clean up state
+      this.requestTokenStore.delete(state);
       
       // Success page
       const html = `

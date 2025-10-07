@@ -372,6 +372,7 @@ export interface OAuthCredentials {
   sessionHandle?: string;
   tokenExpiresAt?: number; // Unix timestamp in milliseconds
   tokenRefreshedAt?: number; // Unix timestamp in milliseconds
+  state?: string; // OAuth 2.0 state parameter for CSRF protection
 }
 
 export interface OAuthTokenResponse {

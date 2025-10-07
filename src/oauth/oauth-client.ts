@@ -1,4 +1,3 @@
-import OAuth from 'oauth-1.0a';
 import crypto from 'crypto';
 import {
   OAuthCredentials,
@@ -7,128 +6,95 @@ import {
 } from '../types/index.js';
 
 export class YahooOAuthClient {
-  private oauth: OAuth;
   private credentials: OAuthCredentials;
+  private authBaseUrl = 'https://api.login.yahoo.com/oauth2';
 
   constructor(credentials: OAuthCredentials) {
     this.credentials = credentials;
-    this.oauth = new OAuth({
-      consumer: {
-        key: credentials.consumerKey,
-        secret: credentials.consumerSecret,
-      },
-      signature_method: 'HMAC-SHA1',
-      hash_function(base_string: string, key: string) {
-        return crypto.createHmac('sha1', key).update(base_string).digest('base64');
-      },
-    });
   }
 
   /**
-   * Get request token for OAuth flow
+   * Get authorization URL for OAuth 2.0 flow
+   * This replaces the old getRequestToken + getAuthorizationUrl pattern
+   */
+  getAuthorizationUrl(callbackUrl?: string): string {
+    const redirectUri = callbackUrl || process.env.OAUTH_CALLBACK_URL || 'http://localhost:3000/oauth/callback';
+    
+    // Generate state parameter for CSRF protection
+    const state = crypto.randomBytes(16).toString('hex');
+    
+    const params = new URLSearchParams({
+      client_id: this.credentials.consumerKey,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      state: state,
+    });
+    
+    // Store state for verification (in production, use session storage)
+    this.credentials.state = state;
+    
+    return `${this.authBaseUrl}/request_auth?${params.toString()}`;
+  }
+
+  /**
+   * Legacy method for compatibility - OAuth 2.0 doesn't use request tokens
+   * Returns a dummy response with the state as the "token"
    */
   async getRequestToken(callbackUrl?: string): Promise<OAuthTokenResponse> {
-    const requestData = {
-      url: 'https://api.login.yahoo.com/oauth/v2/get_request_token',
-      method: 'POST',
-      data: {
-        oauth_callback: callbackUrl || process.env.OAUTH_CALLBACK_URL || 'oob', // Support custom callback or fallback to oob
-        oauth_consumer_key: this.credentials.consumerKey,
-      },
+    const state = crypto.randomBytes(16).toString('hex');
+    this.credentials.state = state;
+    
+    return {
+      oauth_token: state, // Use state as token for compatibility
+      oauth_token_secret: '', // Not used in OAuth 2.0
+      oauth_callback_confirmed: 'true',
     };
-
-    const authHeader = this.oauth.toHeader(this.oauth.authorize(requestData));
-
-    try {
-      const formBody = new URLSearchParams(requestData.data).toString();
-      
-      const response = await fetch(requestData.url, {
-        method: 'POST',
-        headers: {
-          ...authHeader,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: formBody,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const responseText = await response.text();
-      const parsed = this.parseOAuthResponse(responseText);
-      
-      return {
-        oauth_token: parsed.oauth_token || '',
-        oauth_token_secret: parsed.oauth_token_secret || '',
-        oauth_callback_confirmed: parsed.oauth_callback_confirmed || '',
-        oauth_verifier: parsed.oauth_verifier,
-      } as OAuthTokenResponse;
-    } catch (error) {
-      throw new Error(`Failed to get request token: ${error}`);
-    }
   }
 
   /**
-   * Get authorization URL for user to authorize the application
-   */
-  getAuthorizationUrl(requestToken: string): string {
-    const params = new URLSearchParams({
-      oauth_token: requestToken,
-    });
-    return `https://api.login.yahoo.com/oauth/v2/request_auth?${params.toString()}`;
-  }
-
-  /**
-   * Exchange request token for access token
+   * Exchange authorization code for access token (OAuth 2.0)
    */
   async getAccessToken(
-    requestToken: string,
-    requestTokenSecret: string,
-    verifier: string
+    code: string,
+    redirectUri?: string,
+    state?: string
   ): Promise<OAuthAccessTokenResponse> {
-    const requestData = {
-      url: 'https://api.login.yahoo.com/oauth/v2/get_token',
-      method: 'POST',
-      data: {
-        oauth_token: requestToken,
-        oauth_verifier: verifier,
-      },
-    };
-
-    const authHeader = this.oauth.toHeader(
-      this.oauth.authorize(requestData, {
-        key: requestTokenSecret,
-        secret: '',
-      })
-    );
+    const callbackUrl = redirectUri || process.env.OAUTH_CALLBACK_URL || 'http://localhost:3000/oauth/callback';
+    
+    const tokenUrl = `${this.authBaseUrl}/get_token`;
+    
+    const body = new URLSearchParams({
+      client_id: this.credentials.consumerKey,
+      client_secret: this.credentials.consumerSecret,
+      redirect_uri: callbackUrl,
+      code: code,
+      grant_type: 'authorization_code',
+    });
 
     try {
-      const formBody = new URLSearchParams(requestData.data).toString();
-      
-      const response = await fetch(requestData.url, {
+      const response = await fetch(tokenUrl, {
         method: 'POST',
         headers: {
-          ...authHeader,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: formBody,
+        body: body.toString(),
       });
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Token Exchange Error:', errorText);
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const responseText = await response.text();
-      const parsed = this.parseOAuthResponse(responseText);
+      const data = await response.json();
       
       return {
-        oauth_token: parsed.oauth_token || '',
-        oauth_token_secret: parsed.oauth_token_secret || '',
-        oauth_session_handle: parsed.oauth_session_handle,
-        oauth_authorization_expires_in: parsed.oauth_authorization_expires_in,
-        oauth_expires_in: parsed.oauth_expires_in,
-        xoauth_yahoo_guid: parsed.xoauth_yahoo_guid,
+        oauth_token: data.access_token || '',
+        oauth_token_secret: '', // Not used in OAuth 2.0
+        oauth_session_handle: data.refresh_token,
+        oauth_authorization_expires_in: data.expires_in?.toString(),
+        oauth_expires_in: data.expires_in?.toString(),
+        xoauth_yahoo_guid: data.xoauth_yahoo_guid,
       } as OAuthAccessTokenResponse;
     } catch (error) {
       throw new Error(`Failed to get access token: ${error}`);
@@ -136,54 +102,44 @@ export class YahooOAuthClient {
   }
 
   /**
-   * Refresh access token using session handle
+   * Refresh access token using refresh token (OAuth 2.0)
    */
   async refreshAccessToken(
-    accessToken: string,
-    accessTokenSecret: string,
-    sessionHandle: string
+    refreshToken: string
   ): Promise<OAuthAccessTokenResponse> {
-    const requestData = {
-      url: 'https://api.login.yahoo.com/oauth/v2/get_token',
-      method: 'POST',
-      data: {
-        oauth_session_handle: sessionHandle,
-      },
-    };
-
-    const authHeader = this.oauth.toHeader(
-      this.oauth.authorize(requestData, {
-        key: accessToken,
-        secret: accessTokenSecret,
-      })
-    );
+    const tokenUrl = `${this.authBaseUrl}/get_token`;
+    
+    const body = new URLSearchParams({
+      client_id: this.credentials.consumerKey,
+      client_secret: this.credentials.consumerSecret,
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+    });
 
     try {
-      const formBody = new URLSearchParams(requestData.data).toString();
-      
-      const response = await fetch(requestData.url, {
+      const response = await fetch(tokenUrl, {
         method: 'POST',
         headers: {
-          ...authHeader,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: formBody,
+        body: body.toString(),
       });
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Token Refresh Error:', errorText);
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const responseText = await response.text();
-      const parsed = this.parseOAuthResponse(responseText);
+      const data = await response.json();
       
       return {
-        oauth_token: parsed.oauth_token || '',
-        oauth_token_secret: parsed.oauth_token_secret || '',
-        oauth_session_handle: parsed.oauth_session_handle,
-        oauth_authorization_expires_in: parsed.oauth_authorization_expires_in,
-        oauth_expires_in: parsed.oauth_expires_in,
-        xoauth_yahoo_guid: parsed.xoauth_yahoo_guid,
+        oauth_token: data.access_token || '',
+        oauth_token_secret: '', // Not used in OAuth 2.0
+        oauth_session_handle: data.refresh_token || refreshToken, // Keep old refresh token if not provided
+        oauth_authorization_expires_in: data.expires_in?.toString(),
+        oauth_expires_in: data.expires_in?.toString(),
+        xoauth_yahoo_guid: data.xoauth_yahoo_guid,
       } as OAuthAccessTokenResponse;
     } catch (error) {
       throw new Error(`Failed to refresh access token: ${error}`);
@@ -191,41 +147,16 @@ export class YahooOAuthClient {
   }
 
   /**
-   * Create signed authorization header for API requests
+   * Create authorization header for API requests (OAuth 2.0 Bearer token)
    */
   createAuthHeader(
     method: string,
     url: string,
     data?: any
   ): Record<string, string> {
-    const requestData = {
-      url,
-      method,
-      data: data || {},
+    return {
+      'Authorization': `Bearer ${this.credentials.accessToken || ''}`,
     };
-
-    const authHeader = this.oauth.toHeader(
-      this.oauth.authorize(requestData, {
-        key: this.credentials.accessToken || '',
-        secret: this.credentials.accessTokenSecret || '',
-      })
-    );
-
-    return authHeader as unknown as Record<string, string>;
-  }
-
-  /**
-   * Parse OAuth response string into object
-   */
-  private parseOAuthResponse(responseString: string): Record<string, string> {
-    const params = new URLSearchParams(responseString);
-    const result: Record<string, string> = {};
-    
-    for (const [key, value] of params.entries()) {
-      result[key] = value;
-    }
-    
-    return result;
   }
 
   /**
