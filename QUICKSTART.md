@@ -4,17 +4,23 @@ Get up and running in 5 minutes!
 
 ## Prerequisites
 
-- ✅ Node.js 18+ installed
+- ✅ [Bun](https://bun.sh/) installed (faster than Node.js!)
 - ✅ A Yahoo account
 - ✅ 5 minutes of your time
+
+### Install Bun First
+
+```bash
+# macOS/Linux/WSL
+curl -fsSL https://bun.sh/install | bash
+```
 
 ## Step 1: Clone and Install (1 minute)
 
 ```bash
 git clone <repository-url>
 cd yahooMcp
-npm install
-npm run build
+bun install
 ```
 
 ## Step 2: Create Yahoo Developer App (2 minutes)
@@ -49,21 +55,25 @@ YAHOO_CONSUMER_SECRET=paste_your_consumer_secret_here
 OAUTH_CALLBACK_URL=oob
 ```
 
-## Step 4: Authenticate (1 minute)
+## Step 4: Authenticate (30 seconds)
 
 ```bash
-npm start
+bun start
 ```
 
-Follow the prompts:
+The server will start and show:
 
-1. Open the URL shown in your browser
-2. Click **Agree** to authorize the app
-3. Copy the verification code from the URL
-4. Paste it into the terminal
-5. Press Enter
+```
+✅ HTTP OAuth server running on http://localhost:3000
+   Visit http://localhost:3000 to authenticate
+```
 
-**Done!** Your tokens are now saved.
+1. Open `http://localhost:3000` in your browser
+2. Click **"Authenticate with Yahoo"**
+3. Sign in and click **"Agree"**
+4. You'll be redirected back automatically
+
+**Done!** Your tokens are saved to `.oauth-tokens.json` and auto-loaded on restart.
 
 ## Step 5: Test It Out (30 seconds)
 

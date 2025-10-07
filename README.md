@@ -35,9 +35,21 @@ A comprehensive Model Context Protocol (MCP) server providing full access to the
 
 ### Prerequisites
 
-- Node.js >= 18.0.0
-- npm or yarn
+- [Bun](https://bun.sh/) >= 1.0.0 (faster alternative to Node.js)
 - Yahoo Developer Account
+
+### Install Bun
+
+```bash
+# macOS/Linux
+curl -fsSL https://bun.sh/install | bash
+
+# Windows (WSL)
+curl -fsSL https://bun.sh/install | bash
+
+# Or use npm
+npm install -g bun
+```
 
 ### Install Dependencies
 
@@ -47,10 +59,7 @@ git clone <repository-url>
 cd yahooMcp
 
 # Install dependencies
-npm install
-
-# Build the project
-npm run build
+bun install
 ```
 
 ## ⚡ Quick Start
@@ -68,7 +77,7 @@ npm run build
 
 ### 2. Configure Environment Variables
 
-Create a `.env` file or set environment variables:
+Create a `.env` file:
 
 ```bash
 cp env.example .env
@@ -81,34 +90,46 @@ Edit `.env`:
 YAHOO_CONSUMER_KEY=your_consumer_key_here
 YAHOO_CONSUMER_SECRET=your_consumer_secret_here
 
-# Optional: OAuth callback URL (if hosting on a server)
+# Optional: OAuth callback URL
 # For Railway: https://yahoo-mcp-production.up.railway.app/oauth/callback
-# For local: oob (out-of-band)
-OAUTH_CALLBACK_URL=oob
+# For local: http://localhost:3000/oauth/callback
+OAUTH_CALLBACK_URL=http://localhost:3000/oauth/callback
 
-# Optional: Will be obtained through OAuth flow
+# Optional: Will be auto-generated during OAuth flow
 YAHOO_ACCESS_TOKEN=
 YAHOO_ACCESS_TOKEN_SECRET=
 YAHOO_SESSION_HANDLE=
 ```
 
+**Important:** In your Yahoo Developer App, set the **Redirect URI** to match your `OAUTH_CALLBACK_URL`:
+- Local: `http://localhost:3000/oauth/callback`
+- Railway: `https://yahoo-mcp-production.up.railway.app/oauth/callback`
+
 ### 3. Authenticate with Yahoo
 
 ```bash
-npm start
+bun start
 ```
 
-The server will guide you through the OAuth flow:
+The server will start with both HTTP and MCP interfaces:
 
-1. Visit the authorization URL provided in the console
-2. Sign in to Yahoo and authorize the application
-3. Copy the verification code from the redirect URL
-4. Paste it into the console
-5. The server will complete authentication and save your tokens
+1. Open your browser to `http://localhost:3000`
+2. Click **"Authenticate with Yahoo"**
+3. Sign in to Yahoo and authorize the application
+4. You'll be automatically redirected back
+5. Tokens are saved to `.oauth-tokens.json` (auto-loaded on restart)
 
 ### 4. Start Using the MCP Server
 
-Once authenticated, the server is ready to accept tool calls from your MCP client!
+Once authenticated, restart the server:
+
+```bash
+bun start
+```
+
+The server runs in two modes simultaneously:
+- **HTTP Server** (port 3000): OAuth management and health checks
+- **MCP Server** (stdio): AI assistant integration via Model Context Protocol
 
 ## 🔐 Authentication Setup
 
@@ -608,37 +629,36 @@ yahooMcp/
 └── README.md                   # This file
 ```
 
-### Building
+### Building & Running
 
 ```bash
-# Clean build
-rm -rf dist && npm run build
+# Development mode (with auto-reload)
+bun run dev
 
-# Development mode with auto-reload
-npm run dev
-
-# Production build
-npm run build
-```
-
-### Type Generation
-
-The project includes comprehensive TypeScript types. After building, `.d.ts` files are generated in `dist/`:
-
-```bash
-npm run build
-# Types available in dist/**/*.d.ts
-```
-
-### Testing
-
-```bash
-# Run tests (when implemented)
-npm test
+# Production mode
+bun start
 
 # Run linter
-npm run lint
+bun run lint
+
+# Run tests
+bun test
 ```
+
+**Note:** With Bun, you don't need a build step! Bun runs TypeScript natively.
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `YAHOO_CONSUMER_KEY` | ✅ Yes | From Yahoo Developer Console |
+| `YAHOO_CONSUMER_SECRET` | ✅ Yes | From Yahoo Developer Console |
+| `OAUTH_CALLBACK_URL` | ⚠️ Recommended | OAuth redirect URI (default: `http://localhost:3000/oauth/callback`) |
+| `PORT` | ❌ No | HTTP server port (default: 3000) |
+| `HTTP_MODE` | ❌ No | Set to `true` to run HTTP-only (no MCP) |
+| `YAHOO_ACCESS_TOKEN` | ❌ No | Auto-generated during OAuth |
+| `YAHOO_ACCESS_TOKEN_SECRET` | ❌ No | Auto-generated during OAuth |
+| `YAHOO_SESSION_HANDLE` | ❌ No | Auto-generated during OAuth |
 
 ## 🐛 Troubleshooting
 

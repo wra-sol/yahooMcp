@@ -1,0 +1,14 @@
+[install]
+# Auto-install peer dependencies
+auto = "auto"
+
+[install.scopes]
+# Configure registry scopes if needed
+
+[run]
+# Silence warnings for cleaner output
+silent = false
+
+[test]
+# Test configuration
+preload = []

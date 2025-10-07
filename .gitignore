@@ -43,6 +43,7 @@ coverage/
 
 # OAuth token storage (if using file-based storage)
 /tmp/oauth_data_token_storage_*
+.oauth-tokens.json
 
 # TypeScript cache
 *.tsbuildinfo
