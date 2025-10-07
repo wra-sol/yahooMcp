@@ -218,7 +218,7 @@ Create a workflow that:
 
 ### "Could not connect to your MCP server" Error
 
-**Cause**: n8n cannot establish an SSE connection to the server.
+**Cause**: n8n cannot establish an SSE connection to the server, or responses aren't being sent through the SSE stream.
 
 **Solution**:
 1. **Check server is running**: Visit `https://yahoo-mcp-production.up.railway.app/health`
@@ -231,9 +231,35 @@ Create a workflow that:
    curl -N -H "Accept: text/event-stream" \
      https://yahoo-mcp-production.up.railway.app/mcp
    ```
-   - Should receive a session message with sessionId
-4. **Check Railway logs** for any error messages
-5. **Authentication**: The SSE connection will work even without auth, but you must authenticate before running tools
+   - Should receive an endpoint event: `event: endpoint` followed by `data: /mcp/message`
+   - Should receive periodic keepalive pings (`: keepalive`)
+   - Save the `X-Session-Id` header for testing
+4. **Test message flow**:
+   ```bash
+   # First, get the session ID from the SSE connection headers
+   # Then test sending a message with that session ID:
+   curl -X POST https://yahoo-mcp-production.up.railway.app/mcp/message \
+     -H "Content-Type: application/json" \
+     -H "X-Session-Id: YOUR_SESSION_ID" \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+   ```
+   - Should return HTTP 202 (response will come through SSE stream)
+5. **Check Railway logs** for:
+   - `[SSE] New connection: <uuid> (authenticated: true/false)` - confirms SSE connection
+   - `[MCP] Received message: initialize (id: X)` - confirms message received
+   - `[MCP] Sending response through SSE session: <uuid>` - confirms response routing
+6. **Authentication**: The SSE connection will work even without auth, but you must authenticate before running tools
+7. **Test script**: Use the included test script:
+   ```bash
+   # Test SSE mode (simulates n8n)
+   bun run test-sse-mcp.ts sse
+   
+   # Test direct HTTP mode (fallback)
+   bun run test-sse-mcp.ts http
+   
+   # Test both modes
+   bun run test-sse-mcp.ts both
+   ```
 
 ### "MCP server not initialized" Error
 

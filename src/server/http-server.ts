@@ -14,6 +14,7 @@ export class HttpOAuthServer {
   private tokenFilePath: string;
   private mcpServer?: YahooFantasyMcpServer;
   private sseClients: Map<string, ReadableStreamDefaultController> = new Map();
+  private sessionIdMap: Map<string, string> = new Map(); // Map request correlation IDs to session IDs
 
   constructor(credentials: OAuthCredentials, port: number = 3000) {
     this.credentials = credentials;
@@ -516,18 +517,29 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       const message = await req.json();
       console.error(`[MCP] Received message: ${message.method} (id: ${message.id})`);
       
+      // Get session ID from headers (if provided by SSE client)
+      const sessionId = req.headers.get('X-Session-Id');
+      
       // For initialize method, don't check authentication
       if (message.method !== 'initialize') {
         // Check authentication for tool operations
         if (!this.credentials.accessToken || !this.credentials.accessTokenSecret) {
-          return new Response(JSON.stringify({ 
+          const errorResponse = { 
             jsonrpc: '2.0',
             id: message.id,
             error: {
               code: -32001,
               message: 'Not authenticated with Yahoo. Visit the home page to authenticate.'
             }
-          }), {
+          };
+          
+          // Send through SSE if session exists, otherwise return HTTP response
+          if (sessionId && this.sseClients.has(sessionId)) {
+            this.sendSseMessage(sessionId, errorResponse);
+            return new Response('', { status: 202 });
+          }
+          
+          return new Response(JSON.stringify(errorResponse), {
             status: 401,
             headers: { 
               'Content-Type': 'application/json',
@@ -541,7 +553,20 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       const result = await this.mcpServer.handleJsonRpcRequest(message);
       console.error(`[MCP] Sending response for id: ${message.id}`);
       
-      // Return response via HTTP
+      // Send response through SSE stream if session exists, otherwise return HTTP response
+      if (sessionId && this.sseClients.has(sessionId)) {
+        console.error(`[MCP] Sending response through SSE session: ${sessionId}`);
+        this.sendSseMessage(sessionId, result);
+        // Return 202 Accepted to indicate message was received
+        return new Response('', { 
+          status: 202,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+          }
+        });
+      }
+      
+      // Fallback: Return response via HTTP for non-SSE clients
       return new Response(JSON.stringify(result), {
         headers: { 
           'Content-Type': 'application/json',
@@ -561,6 +586,12 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
         }
       };
       
+      const sessionId = req.headers.get('X-Session-Id');
+      if (sessionId && this.sseClients.has(sessionId)) {
+        this.sendSseMessage(sessionId, errorResponse);
+        return new Response('', { status: 202 });
+      }
+      
       return new Response(JSON.stringify(errorResponse), {
         status: 500,
         headers: { 
@@ -568,6 +599,27 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
           'Access-Control-Allow-Origin': '*',
         },
       });
+    }
+  }
+
+  /**
+   * Send a message through an SSE stream
+   */
+  private sendSseMessage(sessionId: string, message: any): void {
+    const controller = this.sseClients.get(sessionId);
+    if (!controller) {
+      console.error(`[SSE] No controller found for session: ${sessionId}`);
+      return;
+    }
+
+    try {
+      const encoder = new TextEncoder();
+      const data = JSON.stringify(message);
+      // Send as SSE message event
+      controller.enqueue(encoder.encode(`event: message\ndata: ${data}\n\n`));
+    } catch (error: any) {
+      console.error(`[SSE] Error sending message to session ${sessionId}:`, error.message);
+      this.sseClients.delete(sessionId);
     }
   }
 
