@@ -174,9 +174,9 @@ export class YahooOAuthClient {
   }
 
   /**
-   * Check if we have valid access token
+   * Check if we have valid access token (OAuth 2.0 only needs accessToken)
    */
   hasValidAccessToken(): boolean {
-    return !!(this.credentials.accessToken && this.credentials.accessTokenSecret);
+    return !!this.credentials.accessToken;
   }
 }

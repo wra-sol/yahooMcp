@@ -81,7 +81,7 @@ export class YahooFantasyClient {
           throw new Error('No session handle available for token refresh. Please re-authenticate.');
         }
 
-        if (!credentials.accessToken || !credentials.accessTokenSecret) {
+        if (!credentials.accessToken) {
           throw new Error('No access token available. Please authenticate first.');
         }
 

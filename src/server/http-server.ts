@@ -82,7 +82,7 @@ export class HttpOAuthServer {
   }
 
   private handleHomePage(): Response {
-    const hasTokens = !!(this.credentials.accessToken && this.credentials.accessTokenSecret);
+    const hasTokens = !!this.credentials.accessToken;
     
     const html = `
       <!DOCTYPE html>
@@ -396,7 +396,7 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
   private handleHealthCheck(): Response {
     const data = {
       status: 'ok',
-      authenticated: !!(this.credentials.accessToken && this.credentials.accessTokenSecret),
+      authenticated: !!this.credentials.accessToken,
       timestamp: new Date().toISOString(),
       server: 'Bun native HTTP',
       mcpEnabled: !!this.mcpServer,
@@ -432,7 +432,7 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
 
     // Generate unique session ID
     const sessionId = crypto.randomUUID();
-    const isAuthenticated = !!(this.credentials.accessToken && this.credentials.accessTokenSecret);
+    const isAuthenticated = !!this.credentials.accessToken;
     console.error(`[SSE] New connection: ${sessionId} (authenticated: ${isAuthenticated})`);
 
     // Create SSE stream - standard MCP format
@@ -597,7 +597,7 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
 
   private async saveTokens(tokens: {
     accessToken: string;
-    accessTokenSecret: string;
+    accessTokenSecret?: string;
     sessionHandle?: string;
     tokenExpiresAt?: number;
     tokenRefreshedAt?: number;
@@ -623,7 +623,7 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
    */
   getTokenSaveCallback(): (credentials: OAuthCredentials) => Promise<void> {
     return async (credentials: OAuthCredentials) => {
-      if (credentials.accessToken && credentials.accessTokenSecret) {
+      if (credentials.accessToken) {
         await this.saveTokens({
           accessToken: credentials.accessToken,
           accessTokenSecret: credentials.accessTokenSecret,

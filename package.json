@@ -7,12 +7,16 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
-    "build": "bun build src/index.ts --compile --outfile yahoo-mcp",
-    "build:all": "bun build src/index.ts --compile --target=bun-darwin-arm64 --outfile yahoo-mcp-darwin-arm64 && bun build src/index.ts --compile --target=bun-darwin-x64 --outfile yahoo-mcp-darwin-x64 && bun build src/index.ts --compile --target=bun-linux-x64 --outfile yahoo-mcp-linux-x64",
+    "build": "bun build src/index.ts --compile --minify --outfile yahoo-mcp",
+    "build:bundle": "bun build src/index.ts --outdir ./dist --target bun --minify --sourcemap=external",
+    "build:optimized": "bun build src/index.ts --compile --minify --target=bun --outfile yahoo-mcp && strip yahoo-mcp 2>/dev/null || true",
+    "build:all": "bun build src/index.ts --compile --minify --target=bun-darwin-arm64 --outfile yahoo-mcp-darwin-arm64 && bun build src/index.ts --compile --minify --target=bun-darwin-x64 --outfile yahoo-mcp-darwin-x64 && bun build src/index.ts --compile --minify --target=bun-linux-x64 --outfile yahoo-mcp-linux-x64",
+    "build:small": "bun build src/index.ts --outdir ./dist --target bun --minify && echo '#!/usr/bin/env bun' > dist/yahoo-mcp && cat dist/index.js >> dist/yahoo-mcp && chmod +x dist/yahoo-mcp",
     "lint": "eslint src/**/*.ts",
     "test": "bun test",
     "test:sse": "bun run test-sse-connection.ts",
-    "test:sse:remote": "SERVER_URL=https://yahoo-mcp-production.up.railway.app bun run test-sse-connection.ts"
+    "test:sse:remote": "SERVER_URL=https://yahoo-mcp-production.up.railway.app bun run test-sse-connection.ts",
+    "size": "ls -lh yahoo-mcp dist/yahoo-mcp dist/index.js 2>/dev/null || echo 'No builds found'"
   },
   "keywords": [
     "mcp",
