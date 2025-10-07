@@ -520,38 +520,8 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       // Get session ID from headers (if provided by SSE client)
       const sessionId = req.headers.get('X-Session-Id');
       
-      // For initialize and tools/list methods, don't check authentication
-      // These are needed for n8n connection testing
-      const authNotRequiredMethods = ['initialize', 'tools/list'];
-      if (!authNotRequiredMethods.includes(message.method)) {
-        // Check authentication for tool operations
-        if (!this.credentials.accessToken || !this.credentials.accessTokenSecret) {
-          const errorResponse = { 
-            jsonrpc: '2.0',
-            id: message.id,
-            error: {
-              code: -32001,
-              message: 'Not authenticated with Yahoo. Visit the home page to authenticate.'
-            }
-          };
-          
-          // Send through SSE if session exists, otherwise return HTTP response
-          if (sessionId && this.sseClients.has(sessionId)) {
-            this.sendSseMessage(sessionId, errorResponse);
-            return new Response('', { status: 202 });
-          }
-          
-          return new Response(JSON.stringify(errorResponse), {
-            status: 401,
-            headers: { 
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*',
-            },
-          });
-        }
-      }
-      
       // Handle the JSON-RPC request
+      // Authentication is checked by individual tools when they need to make Yahoo API calls
       const result = await this.mcpServer.handleJsonRpcRequest(message);
       console.error(`[MCP] Sending response for id: ${message.id}`);
       
