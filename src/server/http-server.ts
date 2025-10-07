@@ -289,6 +289,17 @@ OAUTH_CALLBACK_URL=${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.
         tokenRefreshedAt: now,
       });
       
+      // Update MCP server credentials if it exists
+      if (this.mcpServer) {
+        this.mcpServer.updateCredentials({
+          accessToken: accessToken.oauth_token,
+          accessTokenSecret: accessToken.oauth_token_secret,
+          sessionHandle: accessToken.oauth_session_handle,
+          tokenExpiresAt,
+          tokenRefreshedAt: now,
+        });
+      }
+      
       // Clean up state
       this.requestTokenStore.delete(state);
       
@@ -556,6 +567,17 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
         this.credentials.sessionHandle = credentials.sessionHandle;
         this.credentials.tokenExpiresAt = credentials.tokenExpiresAt;
         this.credentials.tokenRefreshedAt = credentials.tokenRefreshedAt;
+        
+        // Update MCP server credentials if it exists
+        if (this.mcpServer) {
+          this.mcpServer.updateCredentials({
+            accessToken: credentials.accessToken,
+            accessTokenSecret: credentials.accessTokenSecret,
+            sessionHandle: credentials.sessionHandle,
+            tokenExpiresAt: credentials.tokenExpiresAt,
+            tokenRefreshedAt: credentials.tokenRefreshedAt,
+          });
+        }
       }
     };
   }
