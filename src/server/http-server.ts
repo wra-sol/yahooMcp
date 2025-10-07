@@ -520,8 +520,10 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       // Get session ID from headers (if provided by SSE client)
       const sessionId = req.headers.get('X-Session-Id');
       
-      // For initialize method, don't check authentication
-      if (message.method !== 'initialize') {
+      // For initialize and tools/list methods, don't check authentication
+      // These are needed for n8n connection testing
+      const authNotRequiredMethods = ['initialize', 'tools/list'];
+      if (!authNotRequiredMethods.includes(message.method)) {
         // Check authentication for tool operations
         if (!this.credentials.accessToken || !this.credentials.accessTokenSecret) {
           const errorResponse = { 
