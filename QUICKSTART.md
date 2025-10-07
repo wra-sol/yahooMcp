@@ -24,7 +24,9 @@ npm run build
 3. Fill in the form:
    - **Application Name**: "My Fantasy Bot" (or anything you like)
    - **Application Type**: Web Application
-   - **Redirect URI**: `oob` (for out-of-band)
+   - **Redirect URI**: 
+     - For Railway/hosted: `https://yahoo-mcp-production.up.railway.app/oauth/callback`
+     - For local development: `http://localhost:3000/oauth/callback` or try `oob`
    - **API Permissions**: Check "Fantasy Sports" with "Read/Write"
 4. Click **Create App**
 5. **Copy** your Consumer Key and Consumer Secret
@@ -40,6 +42,11 @@ Edit `.env` and paste your credentials:
 ```bash
 YAHOO_CONSUMER_KEY=paste_your_consumer_key_here
 YAHOO_CONSUMER_SECRET=paste_your_consumer_secret_here
+
+# Set this to match your Yahoo Developer App redirect URI
+# For Railway: https://yahoo-mcp-production.up.railway.app/oauth/callback
+# For local: oob or http://localhost:3000/oauth/callback
+OAUTH_CALLBACK_URL=oob
 ```
 
 ## Step 4: Authenticate (1 minute)

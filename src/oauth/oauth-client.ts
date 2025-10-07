@@ -28,12 +28,12 @@ export class YahooOAuthClient {
   /**
    * Get request token for OAuth flow
    */
-  async getRequestToken(): Promise<OAuthTokenResponse> {
+  async getRequestToken(callbackUrl?: string): Promise<OAuthTokenResponse> {
     const requestData = {
       url: 'https://api.login.yahoo.com/oauth/v2/get_request_token',
       method: 'POST',
       data: {
-        oauth_callback: 'oob', // Out-of-band callback
+        oauth_callback: callbackUrl || process.env.OAUTH_CALLBACK_URL || 'oob', // Support custom callback or fallback to oob
         oauth_consumer_key: this.credentials.consumerKey,
       },
     };

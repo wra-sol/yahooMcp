@@ -81,6 +81,11 @@ Edit `.env`:
 YAHOO_CONSUMER_KEY=your_consumer_key_here
 YAHOO_CONSUMER_SECRET=your_consumer_secret_here
 
+# Optional: OAuth callback URL (if hosting on a server)
+# For Railway: https://yahoo-mcp-production.up.railway.app/oauth/callback
+# For local: oob (out-of-band)
+OAUTH_CALLBACK_URL=oob
+
 # Optional: Will be obtained through OAuth flow
 YAHOO_ACCESS_TOKEN=
 YAHOO_ACCESS_TOKEN_SECRET=
