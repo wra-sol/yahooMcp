@@ -1,4 +1,3 @@
-import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { YahooOAuthClient } from '../oauth/oauth-client.js';
 import {
   YahooApiResponse,
@@ -50,9 +49,8 @@ export class YahooFantasyClient {
     const url = `${this.baseUrl}${endpoint}`;
     const authHeader = this.oauthClient.createAuthHeader(method, url, data);
 
-    const config: AxiosRequestConfig = {
+    const fetchOptions: RequestInit = {
       method,
-      url,
       headers: {
         ...authHeader,
         'Content-Type': 'application/xml',
@@ -61,15 +59,24 @@ export class YahooFantasyClient {
     };
 
     if (data && method === 'POST') {
-      config.data = data;
+      fetchOptions.body = data;
     }
 
     try {
-      const response: AxiosResponse<YahooApiResponse<T>> = await axios(config);
-      return response.data.fantasy_content;
+      const response = await fetch(url, fetchOptions);
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Authentication failed. Please re-authenticate.');
+        }
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const responseData: YahooApiResponse<T> = await response.json();
+      return responseData.fantasy_content;
     } catch (error: any) {
-      if (error.response?.status === 401) {
-        throw new Error('Authentication failed. Please re-authenticate.');
+      if (error.message.includes('Authentication failed')) {
+        throw error;
       }
       throw new Error(`API request failed: ${error.message}`);
     }

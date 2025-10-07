@@ -16,8 +16,11 @@ import { OAuthCredentials } from './types/index.js';
  * 
  * Setup:
  * 1. Register your application at https://developer.yahoo.com/
- * 2. Set redirect URI to: http://localhost:3000/oauth/callback (or your Railway URL)
- * 3. Set environment variables: YAHOO_CONSUMER_KEY and YAHOO_CONSUMER_SECRET
+ * 2. Set redirect URI to match your OAUTH_CALLBACK_URL
+ * 3. Set environment variables:
+ *    - YAHOO_CONSUMER_KEY
+ *    - YAHOO_CONSUMER_SECRET
+ *    - OAUTH_CALLBACK_URL (defaults to http://localhost:3000/oauth/callback)
  * 4. Run: bun start
  * 5. Visit http://localhost:3000 to authenticate
  */
@@ -39,12 +42,13 @@ async function main() {
     console.error('📝 Setup Instructions:');
     console.error('1. Go to https://developer.yahoo.com/');
     console.error('2. Create a new application');
-    console.error('3. Set redirect URI to: http://localhost:3000/oauth/callback');
+    console.error(`3. Set redirect URI to: ${process.env.OAUTH_CALLBACK_URL || 'http://localhost:3000/oauth/callback'}`);
     console.error('4. Get your Consumer Key and Consumer Secret');
     console.error('5. Set environment variables:');
     console.error('');
     console.error('   export YAHOO_CONSUMER_KEY="your_consumer_key"');
     console.error('   export YAHOO_CONSUMER_SECRET="your_consumer_secret"');
+    console.error(`   export OAUTH_CALLBACK_URL="${process.env.OAUTH_CALLBACK_URL || 'http://localhost:3000/oauth/callback'}"`);
     console.error('');
     process.exit(1);
   }

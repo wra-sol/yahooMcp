@@ -1,6 +1,5 @@
 import OAuth from 'oauth-1.0a';
 import crypto from 'crypto';
-import axios, { AxiosRequestConfig } from 'axios';
 import {
   OAuthCredentials,
   OAuthTokenResponse,
@@ -41,14 +40,24 @@ export class YahooOAuthClient {
     const authHeader = this.oauth.toHeader(this.oauth.authorize(requestData));
 
     try {
-      const response = await axios.post(requestData.url, requestData.data, {
+      const formBody = new URLSearchParams(requestData.data).toString();
+      
+      const response = await fetch(requestData.url, {
+        method: 'POST',
         headers: {
           ...authHeader,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
+        body: formBody,
       });
 
-      const parsed = this.parseOAuthResponse(response.data);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const responseText = await response.text();
+      const parsed = this.parseOAuthResponse(responseText);
+      
       return {
         oauth_token: parsed.oauth_token || '',
         oauth_token_secret: parsed.oauth_token_secret || '',
@@ -95,14 +104,24 @@ export class YahooOAuthClient {
     );
 
     try {
-      const response = await axios.post(requestData.url, requestData.data, {
+      const formBody = new URLSearchParams(requestData.data).toString();
+      
+      const response = await fetch(requestData.url, {
+        method: 'POST',
         headers: {
           ...authHeader,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
+        body: formBody,
       });
 
-      const parsed = this.parseOAuthResponse(response.data);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const responseText = await response.text();
+      const parsed = this.parseOAuthResponse(responseText);
+      
       return {
         oauth_token: parsed.oauth_token || '',
         oauth_token_secret: parsed.oauth_token_secret || '',
@@ -140,14 +159,24 @@ export class YahooOAuthClient {
     );
 
     try {
-      const response = await axios.post(requestData.url, requestData.data, {
+      const formBody = new URLSearchParams(requestData.data).toString();
+      
+      const response = await fetch(requestData.url, {
+        method: 'POST',
         headers: {
           ...authHeader,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
+        body: formBody,
       });
 
-      const parsed = this.parseOAuthResponse(response.data);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const responseText = await response.text();
+      const parsed = this.parseOAuthResponse(responseText);
+      
       return {
         oauth_token: parsed.oauth_token || '',
         oauth_token_secret: parsed.oauth_token_secret || '',

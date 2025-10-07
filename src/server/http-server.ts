@@ -109,13 +109,12 @@ export class HttpOAuthServer {
               <h2>Setup Instructions</h2>
               <ol>
                 <li>Make sure you've set up your Yahoo Developer App with redirect URI:
-                  <pre><code>http://localhost:${this.port}/oauth/callback</code></pre>
-                  or
-                  <pre><code>https://yahoo-mcp-production.up.railway.app/oauth/callback</code></pre>
+                  <pre><code>${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.port}/oauth/callback`}</code></pre>
                 </li>
                 <li>Set your environment variables:
                   <pre><code>YAHOO_CONSUMER_KEY=your_key
-YAHOO_CONSUMER_SECRET=your_secret</code></pre>
+YAHOO_CONSUMER_SECRET=your_secret
+OAUTH_CALLBACK_URL=${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.port}/oauth/callback`}</code></pre>
                 </li>
                 <li>Click the "Authenticate with Yahoo" button above</li>
                 <li>Your tokens will be saved automatically</li>
