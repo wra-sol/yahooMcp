@@ -409,31 +409,21 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
 
   /**
    * Handle MCP SSE endpoint for Server-Sent Events
+   * Standard MCP SSE transport - keeps connection open for responses
    */
   private async handleMcpSSE(req: Request): Promise<Response> {
     if (!this.mcpServer) {
-      // Return 503 with proper error response
-      const errorStream = new ReadableStream({
-        start: (controller) => {
-          const encoder = new TextEncoder();
-          const errorMessage = {
-            jsonrpc: '2.0',
-            error: {
-              code: -32603,
-              message: 'MCP server not initialized. Please authenticate first.',
-            },
-          };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(errorMessage)}\n\n`));
-          controller.close();
+      // Return error as plain JSON, not SSE
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: 'MCP server not initialized. Please authenticate first.',
         },
-      });
-      
-      return new Response(errorStream, {
+      }), {
         status: 503,
         headers: { 
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
+          'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
         },
       });
@@ -444,7 +434,7 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
     const isAuthenticated = !!(this.credentials.accessToken && this.credentials.accessTokenSecret);
     console.error(`[SSE] New connection: ${sessionId} (authenticated: ${isAuthenticated})`);
 
-    // Create SSE stream
+    // Create SSE stream - standard MCP format
     const stream = new ReadableStream({
       start: async (controller) => {
         try {
@@ -453,40 +443,19 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
           
           const encoder = new TextEncoder();
           
-          // Send session ID as first message (MCP SSE format)
-          const sessionMessage = {
-            jsonrpc: '2.0',
-            method: 'session',
-            params: {
-              sessionId,
-              endpoint: '/mcp/message',
-              authenticated: isAuthenticated,
-            },
-          };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(sessionMessage)}\n\n`));
+          // MCP SSE protocol: Just send endpoint info as a comment, not a data event
+          // This tells the client where to send requests
+          controller.enqueue(encoder.encode(`event: endpoint\ndata: /mcp/message\n\n`));
           
-          // Send authentication warning if not authenticated
-          if (!isAuthenticated) {
-            const warningMessage = {
-              jsonrpc: '2.0',
-              method: 'notification',
-              params: {
-                level: 'warning',
-                message: 'Not authenticated with Yahoo. Visit the home page to authenticate.',
-              },
-            };
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(warningMessage)}\n\n`));
-          }
-          
-          // Keep connection alive with periodic pings
+          // Keep connection alive with periodic pings (comments, not data events)
           const pingInterval = setInterval(() => {
             try {
-              controller.enqueue(encoder.encode(': ping\n\n'));
+              controller.enqueue(encoder.encode(': keepalive\n\n'));
             } catch (e) {
               clearInterval(pingInterval);
               this.sseClients.delete(sessionId);
             }
-          }, 30000);
+          }, 15000); // Send every 15 seconds to keep connection alive
 
           // Handle connection close
           req.signal.addEventListener('abort', () => {
@@ -514,7 +483,8 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
         'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Session-Id',
+        'X-Accel-Buffering': 'no', // Disable buffering for SSE
         'X-Session-Id': sessionId,
       },
     });
@@ -522,21 +492,19 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
 
   /**
    * Handle MCP message POST endpoint
+   * This handles JSON-RPC requests from MCP clients like n8n
    */
   private async handleMcpMessage(req: Request): Promise<Response> {
     if (!this.mcpServer) {
-      return new Response(JSON.stringify({ error: 'MCP server not initialized' }), {
+      return new Response(JSON.stringify({ 
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32603,
+          message: 'MCP server not initialized'
+        }
+      }), {
         status: 503,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
-    }
-
-    if (!this.credentials.accessToken || !this.credentials.accessTokenSecret) {
-      return new Response(JSON.stringify({ error: 'Not authenticated with Yahoo' }), {
-        status: 401,
         headers: { 
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
@@ -548,29 +516,32 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       const message = await req.json();
       console.error(`[MCP] Received message: ${message.method} (id: ${message.id})`);
       
-      // Get session ID from headers
-      const sessionId = req.headers.get('X-Session-Id');
+      // For initialize method, don't check authentication
+      if (message.method !== 'initialize') {
+        // Check authentication for tool operations
+        if (!this.credentials.accessToken || !this.credentials.accessTokenSecret) {
+          return new Response(JSON.stringify({ 
+            jsonrpc: '2.0',
+            id: message.id,
+            error: {
+              code: -32001,
+              message: 'Not authenticated with Yahoo. Visit the home page to authenticate.'
+            }
+          }), {
+            status: 401,
+            headers: { 
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        }
+      }
       
       // Handle the JSON-RPC request
       const result = await this.mcpServer.handleJsonRpcRequest(message);
       console.error(`[MCP] Sending response for id: ${message.id}`);
       
-      // If we have an SSE connection for this session, send response through SSE
-      if (sessionId && this.sseClients.has(sessionId)) {
-        const controller = this.sseClients.get(sessionId);
-        if (controller) {
-          try {
-            const encoder = new TextEncoder();
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(result)}\n\n`));
-            console.error(`[MCP] Response sent via SSE for session: ${sessionId}`);
-          } catch (error) {
-            console.error(`[MCP] Failed to send via SSE: ${error}`);
-            // Fall through to HTTP response
-          }
-        }
-      }
-      
-      // Also return via HTTP (for compatibility)
+      // Return response via HTTP
       return new Response(JSON.stringify(result), {
         headers: { 
           'Content-Type': 'application/json',
@@ -582,9 +553,12 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
     } catch (error: any) {
       console.error('[MCP] Message error:', error);
       const errorResponse = { 
-        error: error.message || 'Internal server error',
         jsonrpc: '2.0',
         id: null,
+        error: {
+          code: -32603,
+          message: error.message || 'Internal server error'
+        }
       };
       
       return new Response(JSON.stringify(errorResponse), {
