@@ -54,7 +54,6 @@ async function main() {
   }
 
   const port = parseInt(process.env.PORT || '3000', 10);
-  const httpMode = process.env.HTTP_MODE === 'true' || !credentials.accessToken;
   const useStdio = process.env.USE_STDIO === 'true';
 
   try {
@@ -64,6 +63,7 @@ async function main() {
 
     // Get potentially updated credentials from loaded tokens
     const updatedCredentials = httpServer.getCredentials();
+    const httpMode = process.env.HTTP_MODE === 'true';
 
     if (!httpMode && updatedCredentials.accessToken) {
       // Start MCP server if we have tokens and not in HTTP-only mode
