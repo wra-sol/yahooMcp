@@ -444,9 +444,16 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
           
           const encoder = new TextEncoder();
           
-          // MCP SSE protocol: Just send endpoint info as a comment, not a data event
-          // This tells the client where to send requests
-          controller.enqueue(encoder.encode(`event: endpoint\ndata: /mcp/message\n\n`));
+          // MCP SSE protocol: advertise message endpoint and session headers
+          const endpointPayload = {
+            url: '/mcp/message',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Session-Id': sessionId,
+            },
+          };
+          controller.enqueue(encoder.encode(`event: endpoint\ndata: ${JSON.stringify(endpointPayload)}\n\n`));
+          controller.enqueue(encoder.encode(`event: session\ndata: ${JSON.stringify({ sessionId })}\n\n`));
           
           // Keep connection alive with periodic pings (comments, not data events)
           const pingInterval = setInterval(() => {
@@ -513,6 +520,9 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       });
     }
 
+    const sessionId = req.headers.get('X-Session-Id') || undefined;
+    let message: any;
+
     try {
       // Check if request has a body
       const contentLength = req.headers.get('content-length');
@@ -520,16 +530,19 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
         throw new Error('Empty request body. Expected JSON-RPC message.');
       }
       
-      const message = await req.json();
+      message = await req.json();
       console.error(`[MCP] Received message: ${message.method} (id: ${message.id})`);
-      
-      // Get session ID from headers (if provided by SSE client)
-      const sessionId = req.headers.get('X-Session-Id');
       
       // Handle the JSON-RPC request
       // Authentication is checked by individual tools when they need to make Yahoo API calls
       const result = await this.mcpServer.handleJsonRpcRequest(message);
       console.error(`[MCP] Sending response for id: ${message.id}`);
+
+      if (sessionId) {
+        this.sendSseMessage(sessionId, result);
+      } else {
+        console.error('[MCP] No session id provided; skipping SSE broadcast');
+      }
       
       // Standard MCP SSE: Always return response in HTTP body
       // SSE stream is only for server-initiated notifications
@@ -543,14 +556,19 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       });
     } catch (error: any) {
       console.error('[MCP] Message error:', error);
+      const responseId = message?.id ?? null;
       const errorResponse = { 
         jsonrpc: '2.0',
-        id: null,
+        id: responseId,
         error: {
           code: -32603,
           message: error.message || 'Internal server error'
         }
       };
+
+      if (sessionId) {
+        this.sendSseMessage(sessionId, errorResponse);
+      }
       
       // Standard MCP SSE: Always return errors in HTTP body
       return new Response(JSON.stringify(errorResponse), {
