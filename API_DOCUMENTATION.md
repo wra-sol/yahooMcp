@@ -1,23 +1,24 @@
 # Yahoo Fantasy MCP Server - API Documentation
 
-Complete reference for all available MCP tools and their parameters.
+Complete reference for all 54 available MCP tools and their parameters.
 
 ## Table of Contents
 
-- [User & Game Management](#user--game-management)
-- [League Management](#league-management)
-- [Team Management](#team-management)
-- [Player Management](#player-management)
-- [Transaction Management](#transaction-management)
-- [Waiver Management](#waiver-management)
-- [Trade Management](#trade-management)
-- [Matchup & Scoring](#matchup--scoring)
-- [Commissioner Tools](#commissioner-tools)
+- [User & Game Management (9 tools)](#user--game-management)
+- [League Management (16 tools)](#league-management)
+- [Team Management (6 tools)](#team-management)
+- [Player Management (8 tools)](#player-management)
+- [Transaction Management (8 tools)](#transaction-management)
+- [Waiver Management (3 tools)](#waiver-management)
+- [Trade Management (included in Transactions)](#trade-management)
+- [Commissioner Tools (4 tools)](#commissioner-tools)
 - [Type Definitions](#type-definitions)
 
 ---
 
 ## User & Game Management
+
+This section includes 9 tools for managing user accounts, game information, and user history.
 
 ### `get_user_games`
 
@@ -129,7 +130,55 @@ Get all teams for the current user across all games.
 
 ---
 
+### `get_league_history`
+
+Get historical league data including past seasons standings and results.
+
+**Parameters:**
+```typescript
+{
+  leagueKey: string  // Required: League key for a past season (e.g., "390.l.123456" for 2019 NFL)
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_league_history",
+  "arguments": {
+    "leagueKey": "390.l.123456"
+  }
+}
+```
+
+---
+
+### `get_team_history`
+
+Get historical team performance data including stats, standings, and matchups.
+
+**Parameters:**
+```typescript
+{
+  teamKey: string  // Required: Team key for a past season (e.g., "390.l.123456.t.1")
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_team_history",
+  "arguments": {
+    "teamKey": "390.l.123456.t.1"
+  }
+}
+```
+
+---
+
 ## League Management
+
+This section includes 16 tools for comprehensive league data access.
 
 ### `get_league`
 
@@ -201,6 +250,52 @@ LeagueSettings {
 
 ---
 
+### `get_league_metadata`
+
+Get league metadata.
+
+**Parameters:**
+```typescript
+{
+  leagueKey: string  // Required: League key (e.g., "414.l.123456")
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_league_metadata",
+  "arguments": {
+    "leagueKey": "414.l.123456"
+  }
+}
+```
+
+---
+
+### `get_league_rosters`
+
+Get roster information for all teams in a league.
+
+**Parameters:**
+```typescript
+{
+  leagueKey: string  // Required: League key (e.g., "414.l.123456")
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_league_rosters",
+  "arguments": {
+    "leagueKey": "414.l.123456"
+  }
+}
+```
+
+---
+
 ### `get_league_standings`
 
 Get league standings.
@@ -227,6 +322,35 @@ Get league standings.
 {
   standings: Standing[];
   count: number;
+}
+```
+
+---
+
+### `get_league_teams`
+
+Get all teams in a league.
+
+**Parameters:**
+```typescript
+{
+  leagueKey: string;  // Required: League key
+  filters?: {         // Optional filters
+    stats?: boolean;
+    standings?: boolean;
+    rosters?: boolean;
+  }
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_league_teams",
+  "arguments": {
+    "leagueKey": "414.l.123456",
+    "filters": { "stats": true }
+  }
 }
 ```
 
@@ -284,6 +408,138 @@ Get detailed matchup information including rosters, stats, and scoring.
 
 ---
 
+### `get_league_stats`
+
+Get league-wide statistics aggregated across all teams.
+
+**Parameters:**
+```typescript
+{
+  leagueKey: string  // Required: League key (e.g., "414.l.123456")
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_league_stats",
+  "arguments": {
+    "leagueKey": "414.l.123456"
+  }
+}
+```
+
+---
+
+### `get_live_scores`
+
+Get live scoring updates for league matchups.
+
+**Parameters:**
+```typescript
+{
+  leagueKey: string;  // Required: League key
+  week?: string;      // Optional: Week number (default: current week)
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_live_scores",
+  "arguments": {
+    "leagueKey": "414.l.123456",
+    "week": "5"
+  }
+}
+```
+
+---
+
+### `get_game_updates`
+
+Get real-time game updates and current state.
+
+**Parameters:**
+```typescript
+{
+  gameKey: string  // Required: Game key (e.g., "nfl", "mlb", "414")
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_game_updates",
+  "arguments": {
+    "gameKey": "nfl"
+  }
+}
+```
+
+---
+
+### `get_league_transactions`
+
+Get league transactions (trades, adds, drops).
+
+**Parameters:**
+```typescript
+{
+  leagueKey: string;  // Required: League key
+  filters?: {
+    type?: string;           // Transaction type filter
+    types?: string[];        // Multiple types
+    team_key?: string;       // Filter by team
+    count?: number;          // Number of results
+  }
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_league_transactions",
+  "arguments": {
+    "leagueKey": "414.l.123456",
+    "filters": { "type": "trade", "count": 10 }
+  }
+}
+```
+
+---
+
+### `get_league_players`
+
+Get all players in a league.
+
+**Parameters:**
+```typescript
+{
+  leagueKey: string;  // Required: League key
+  filters?: {
+    position?: string;       // Position filter
+    status?: string;         // Status filter
+    search?: string;         // Name search
+    count?: number;          // Number of results
+    start?: number;          // Pagination start
+  }
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_league_players",
+  "arguments": {
+    "leagueKey": "414.l.123456",
+    "filters": { "position": "QB", "count": 25 }
+  }
+}
+```
+
+---
+
 ### `get_draft_results`
 
 Get draft results for a league.
@@ -315,7 +571,55 @@ Get draft results for a league.
 
 ---
 
+### `get_draft_teams`
+
+Get draft team information for a league.
+
+**Parameters:**
+```typescript
+{
+  leagueKey: string  // Required: League key (e.g., "414.l.123456")
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_draft_teams",
+  "arguments": {
+    "leagueKey": "414.l.123456"
+  }
+}
+```
+
+---
+
+### `get_draft_settings`
+
+Get draft settings and configuration for a league.
+
+**Parameters:**
+```typescript
+{
+  leagueKey: string  // Required: League key (e.g., "414.l.123456")
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_draft_settings",
+  "arguments": {
+    "leagueKey": "414.l.123456"
+  }
+}
+```
+
+---
+
 ## Team Management
+
+This section includes 6 tools for team data and roster management.
 
 ### `get_team`
 
@@ -411,7 +715,48 @@ Get team statistics for season/week/date ranges.
 
 ---
 
+### `get_team_context`
+
+Build a comprehensive team context package combining league settings, roster, and matchup snapshot for AI agent use.
+
+**Parameters:**
+```typescript
+{
+  leagueKey: string;  // Required: League key (e.g., "465.l.27830")
+  teamKey: string;    // Required: Team key (e.g., "465.l.27830.t.10")
+  options?: {
+    week?: string;    // Optional: Scoring week to target (defaults to current week)
+  }
+}
+```
+
+**Example:**
+```json
+{
+  "tool": "get_team_context",
+  "arguments": {
+    "leagueKey": "465.l.27830",
+    "teamKey": "465.l.27830.t.10",
+    "options": { "week": "5" }
+  }
+}
+```
+
+**Response:**
+Returns a comprehensive context object including:
+- League settings (scoring type, roster positions, waiver rules)
+- Current roster (all players with positions and eligibility)
+- Current matchup (opponent, scores, week)
+- Transaction limits (weekly adds remaining, FAAB budget)
+- Validation status
+
+This tool is optimized for AI agents that need complete team state for decision-making.
+
+---
+
 ## Player Management
+
+This section includes 8 tools for player search, statistics, and availability.
 
 ### `search_players`
 
@@ -579,6 +924,8 @@ Get available free agents in a league.
 
 ## Transaction Management
 
+This section includes 8 tools for managing player transactions and trades.
+
 ### `add_player`
 
 Add a player to your team (free agent pickup).
@@ -667,6 +1014,8 @@ Add one player and drop another in a single transaction.
 ---
 
 ## Waiver Management
+
+This section includes 3 tools for managing waiver claims and priorities.
 
 ### `get_waiver_claims`
 
@@ -900,6 +1249,8 @@ Vote on a pending trade (if league allows voting).
 ---
 
 ## Commissioner Tools
+
+This section includes 4 tools for league commissioners to manage league settings and transactions.
 
 ⚠️ **All commissioner tools require you to be the league commissioner.**
 

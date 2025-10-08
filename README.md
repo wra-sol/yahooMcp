@@ -8,7 +8,7 @@ A comprehensive Model Context Protocol (MCP) server providing full access to the
 
 ## 🌟 Features
 
-- **100+ API Tools**: Complete coverage of Yahoo Fantasy Sports API
+- **54 MCP Tools**: Complete coverage of Yahoo Fantasy Sports API
 - **OAuth 1.0a Authentication**: Secure authentication with automatic token refresh
 - **Full TypeScript Support**: Comprehensive type definitions for all endpoints
 - **MCP Protocol Compliant**: Standard implementation for seamless AI assistant integration
@@ -542,17 +542,18 @@ await oauthClient.refreshAccessToken(sessionHandle);
 
 ## 🛠️ Available Tools
 
-### User & Game Management (8 tools)
+### User & Game Management (9 tools)
 - `get_user_games` - Get user's fantasy games
 - `get_user_leagues` - Get user's leagues for a specific game
 - `get_user_profile` - Get user profile information
 - `get_user_teams` - Get all teams for a user
+- `get_league_history` - Get historical league data from past seasons
+- `get_team_history` - Get historical team performance data
 - `get_game_info` - Get detailed game information
 - `get_game_metadata` - Get game metadata and settings
 - `get_game_stat_categories` - Get stat categories for a game
-- `search_players` - Search for players by name/position
 
-### League Management (12 tools)
+### League Management (16 tools)
 - `get_league` - Get detailed league information
 - `get_league_settings` - Get league settings and configuration
 - `get_league_metadata` - Get league metadata
@@ -560,29 +561,35 @@ await oauthClient.refreshAccessToken(sessionHandle);
 - `get_league_standings` - Get league standings
 - `get_league_teams` - Get all teams in a league
 - `get_league_scoreboard` - Get league scoreboard/matchups
+- `get_matchup_details` - Get detailed matchup information
+- `get_league_stats` - Get league-wide statistics
+- `get_live_scores` - Get live scoring updates
+- `get_game_updates` - Get real-time game updates
 - `get_league_transactions` - Get league transactions
 - `get_league_players` - Get all players in a league
 - `get_draft_results` - Get draft results
 - `get_draft_teams` - Get draft team information
 - `get_draft_settings` - Get draft settings
 
-### Team Management (5 tools)
+### Team Management (6 tools)
 - `get_team` - Get detailed team information
 - `get_team_roster` - Get team roster
 - `get_team_matchups` - Get team matchups
 - `get_team_transactions` - Get team transactions
 - `get_team_stats` - Get team statistics
+- `get_team_context` - Get comprehensive team context for AI agents
 
-### Player Management (7 tools)
+### Player Management (8 tools)
 - `get_player` - Get detailed player information
 - `get_player_stats` - Get player statistics
 - `get_player_ownership` - Get player ownership info
 - `get_player_notes` - Get Yahoo editorial notes
 - `get_free_agents` - Get available free agents
+- `search_players` - Search for players by name/position
 - `search_players_by_position` - Advanced player search
 - `get_injured_reserve` - Get players on IR
 
-### Transactions (9 tools)
+### Transactions (8 tools)
 - `add_player` - Add a player to your team
 - `drop_player` - Drop a player from your team
 - `add_drop_players` - Add and drop in one transaction
@@ -591,15 +598,11 @@ await oauthClient.refreshAccessToken(sessionHandle);
 - `reject_trade` - Reject a pending trade
 - `cancel_trade` - Cancel a trade proposal
 - `vote_on_trade` - Vote on a trade
-- `get_waiver_claims` - Get pending waiver claims
 
-### Waiver Management (2 tools)
+### Waiver Management (3 tools)
+- `get_waiver_claims` - Get pending waiver claims
 - `edit_waiver_claim` - Edit pending waiver claim
 - `cancel_waiver_claim` - Cancel waiver claim
-
-### Matchups & Scoring (2 tools)
-- `get_matchup_details` - Get detailed matchup information
-- `get_team_stats` - Get team statistics
 
 ### Commissioner Tools (4 tools)
 - `edit_league_settings` - Edit league settings
@@ -607,7 +610,7 @@ await oauthClient.refreshAccessToken(sessionHandle);
 - `process_transaction` - Process pending transactions
 - `edit_team_roster` - Edit team roster positions
 
-**Total: 49+ MCP Tools**
+**Total: 54 MCP Tools**
 
 ## 📖 TypeScript Types
 
@@ -706,12 +709,14 @@ Yahoo Fantasy uses specific key formats to identify resources:
 
 ### Game IDs by Sport
 
-| Sport | Game Key | Current Season Game ID (2024) |
-|-------|----------|-------------------------------|
-| NFL | `nfl` | `423` |
-| MLB | `mlb` | `422` |
-| NBA | `nba` | `424` |
-| NHL | `nhl` | `425` |
+| Sport | Game Key | Example Game ID (2024-2025) |
+|-------|----------|------------------------------|
+| NFL | `nfl` | `449` (2024 season) |
+| MLB | `mlb` | `448` (2025 season) |
+| NBA | `nba` | `450` (2024-2025 season) |
+| NHL | `nhl` | `451` (2024-2025 season) |
+
+**Note:** Game IDs change each season. Use `get_user_games` or `get_user_leagues` with the sport key (e.g., `"nfl"`) to automatically get the current season's data. Specific game IDs are only needed for accessing historical data.
 
 ## ⚠️ Error Handling
 

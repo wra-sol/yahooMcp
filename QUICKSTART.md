@@ -240,11 +240,11 @@ See [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md) for complete instructions.
 ### Key Formats
 
 ```
-Game:        nfl, mlb, nba, nhl
-League:      423.l.123456
-Team:        423.l.123456.t.1
-Player:      423.p.31023
-Transaction: 423.l.123456.tr.2
+Game:        nfl, mlb, nba, nhl (use these for current season)
+League:      449.l.123456 (game_id.l.league_id)
+Team:        449.l.123456.t.1 (game_id.l.league_id.t.team_id)
+Player:      449.p.31023 (game_id.p.player_id)
+Transaction: 449.l.123456.tr.2 (game_id.l.league_id.tr.trans_id)
 ```
 
 ### Common Tools
@@ -262,16 +262,18 @@ Transaction: 423.l.123456.tr.2
 
 ### Sport Codes
 
-| Sport | Code | 2024 Game ID |
-|-------|------|--------------|
-| NFL | `nfl` | `423` |
-| MLB | `mlb` | `422` |
-| NBA | `nba` | `424` |
-| NHL | `nhl` | `425` |
+| Sport | Code | Example Game ID |
+|-------|------|-----------------|
+| NFL | `nfl` | `449` (2024) |
+| MLB | `mlb` | `448` (2025) |
+| NBA | `nba` | `450` (2024-25) |
+| NHL | `nhl` | `451` (2024-25) |
+
+**Tip:** Always use the sport code (e.g., `"nfl"`) rather than the game ID to automatically get current season data.
 
 ---
 
 **Need help?** Check the [full documentation](README.md) or [Yahoo API docs](https://developer.yahoo.com/fantasysports/guide/)
 
-**Ready to dive deeper?** See [API_DOCUMENTATION.md](API_DOCUMENTATION.md) for all 49+ tools!
+**Ready to dive deeper?** See [API_DOCUMENTATION.md](API_DOCUMENTATION.md) for all 54 tools!
 
