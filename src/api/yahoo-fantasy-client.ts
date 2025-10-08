@@ -214,8 +214,32 @@ export class YahooFantasyClient {
         throw new Error(`Expected JSON but received ${contentType}. Response: ${responseText.substring(0, 100)}`);
       }
       
-      const responseData: YahooApiResponse<T> = JSON.parse(responseText);
-      return responseData.fantasy_content;
+      const responseData = JSON.parse(responseText);
+      
+      // Yahoo API JSON responses have fantasy_content at the root
+      // If it doesn't exist, the response might be an error or have a different structure
+      if (responseData && typeof responseData === 'object') {
+        if ('fantasy_content' in responseData) {
+          return responseData.fantasy_content as T;
+        }
+        
+        // If no fantasy_content wrapper, check if this is an error response
+        if ('error' in responseData) {
+          const error = responseData.error;
+          throw new Error(`Yahoo API Error: ${error.description || error.message || JSON.stringify(error)}`);
+        }
+        
+        // Log the unexpected structure for debugging
+        console.error('⚠️  Unexpected Yahoo API response structure:');
+        console.error('   Keys found:', Object.keys(responseData));
+        console.error('   Response preview:', JSON.stringify(responseData).substring(0, 300));
+        
+        // Try to return the data directly if it looks valid
+        // This handles cases where Yahoo might return data without the fantasy_content wrapper
+        return responseData as T;
+      }
+      
+      throw new Error('Invalid response structure from Yahoo API');
     } catch (error: any) {
       if (error.message.includes('Authentication failed')) {
         throw error;
@@ -238,8 +262,16 @@ export class YahooFantasyClient {
     // { users: { 0: { user: [{ guid: ... }, { games: { 0: { game: [...] }, count: N } }] } } }
     
     try {
+      // Debug: Log the structure we received
+      if (!response || typeof response !== 'object') {
+        console.error('❌ getUserGames: Invalid response type:', typeof response);
+        return { games: [], count: 0 };
+      }
+      
       const usersObj = response.users;
       if (!usersObj || typeof usersObj !== 'object') {
+        console.error('❌ getUserGames: Missing or invalid users object');
+        console.error('   Response keys:', Object.keys(response));
         return { games: [], count: 0 };
       }
       
@@ -323,8 +355,16 @@ export class YahooFantasyClient {
     // Yahoo API returns deeply nested object structure with numeric keys
     
     try {
+      // Debug: Log the structure we received
+      if (!response || typeof response !== 'object') {
+        console.error('❌ getUserLeagues: Invalid response type:', typeof response);
+        return { leagues: [], count: 0 };
+      }
+      
       const usersObj = response.users;
       if (!usersObj || typeof usersObj !== 'object') {
+        console.error('❌ getUserLeagues: Missing or invalid users object');
+        console.error('   Response keys:', Object.keys(response));
         return { leagues: [], count: 0 };
       }
       
@@ -1139,12 +1179,25 @@ export class YahooFantasyClient {
     const items: T[] = [];
 
     for (const key in collectionObj) {
-      if (key !== 'count' && collectionObj[key]?.[itemKey]) {
-        const itemData = collectionObj[key][itemKey];
+      // Skip 'count' and non-numeric keys
+      if (key === 'count') continue;
+      
+      const entry = collectionObj[key];
+      if (!entry || typeof entry !== 'object') continue;
+      
+      // Check if this entry has the itemKey we're looking for
+      if (itemKey in entry) {
+        const itemData = entry[itemKey];
+        
         // Yahoo sometimes wraps items in single-element arrays
-        if (Array.isArray(itemData) && itemData.length > 0) {
-          items.push(itemData[0]);
-        } else if (typeof itemData === 'object') {
+        if (Array.isArray(itemData)) {
+          if (itemData.length > 0) {
+            // If array contains objects, add them individually
+            if (typeof itemData[0] === 'object' && itemData[0] !== null) {
+              items.push(itemData[0]);
+            }
+          }
+        } else if (itemData && typeof itemData === 'object') {
           items.push(itemData);
         }
       }
