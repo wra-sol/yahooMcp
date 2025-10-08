@@ -444,16 +444,8 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
           
           const encoder = new TextEncoder();
           
-          // MCP SSE protocol: advertise message endpoint and session headers
-          const endpointPayload = {
-            url: '/mcp/message',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Session-Id': sessionId,
-            },
-          };
-          controller.enqueue(encoder.encode(`event: endpoint\ndata: ${JSON.stringify(endpointPayload)}\n\n`));
-          controller.enqueue(encoder.encode(`event: session\ndata: ${JSON.stringify({ sessionId })}\n\n`));
+          // MCP SSE protocol: advertise message endpoint for JSON-RPC POSTs
+          controller.enqueue(encoder.encode(`event: endpoint\ndata: /mcp/message\n\n`));
           
           // Keep connection alive with periodic pings (comments, not data events)
           const pingInterval = setInterval(() => {
