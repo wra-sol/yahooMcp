@@ -1724,6 +1724,10 @@ export class FantasyTools {
     const playersContainerEntry = teamArray.find((entry: any) => entry?.players);
     const playersContainer = playersContainerEntry?.players;
     if (!playersContainer || typeof playersContainer !== 'object') {
+      console.error('⚠️  parseTeamPlayers: No valid players container found');
+      if (teamResponse && typeof teamResponse === 'object') {
+        console.error('   Team response keys:', Object.keys(teamResponse));
+      }
       return [];
     }
 
@@ -1731,7 +1735,10 @@ export class FantasyTools {
     for (const key in playersContainer) {
       if (key === 'count') continue;
       const playerEntryArray = playersContainer[key]?.player;
-      if (!Array.isArray(playerEntryArray)) continue;
+      if (!Array.isArray(playerEntryArray)) {
+        console.error(`⚠️  parseTeamPlayers: Player entry ${key} is not an array:`, typeof playerEntryArray);
+        continue;
+      }
       const flattened = this.flattenYahooObjectArray(playerEntryArray);
       const eligibility = Array.isArray(flattened.eligible_positions)
         ? flattened.eligible_positions.map((pos: any) => pos?.position).filter(Boolean)
