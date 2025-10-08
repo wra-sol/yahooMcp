@@ -265,9 +265,38 @@ export class YahooFantasyClient {
    */
   async getUserLeagues(gameKey: string): Promise<{ leagues: League[]; count: number }> {
     const response = await this.makeRequest<any>('GET', `/users;use_login=1/games;game_keys=${gameKey}/leagues`);
+    
+    // Debug: log the full response structure
+    console.error('[DEBUG] getUserLeagues raw response:', JSON.stringify(response, null, 2));
+    
+    // Yahoo API returns leagues nested in users -> games structure
+    // Response structure: { users: { 0: { user: [{ games: { 0: { game: [{ leagues: [...] }] } } }] } } }
+    let leagues: League[] = [];
+    let count = 0;
+    
+    try {
+      if (response.users && response.users[0]) {
+        const userArray = response.users[0].user;
+        if (Array.isArray(userArray) && userArray[0]) {
+          const games = userArray[0].games;
+          if (games && games[0]) {
+            const gameArray = games[0].game;
+            if (Array.isArray(gameArray) && gameArray[0]) {
+              leagues = gameArray[0].leagues || [];
+              count = gameArray[0].count || 0;
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[DEBUG] Error extracting leagues:', error);
+    }
+    
+    console.error('[DEBUG] Extracted leagues count:', count);
+    
     return {
-      leagues: response.leagues || [],
-      count: response.count || 0,
+      leagues,
+      count,
     };
   }
 

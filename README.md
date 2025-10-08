@@ -68,6 +68,39 @@ cd yahooMcp
 bun install
 ```
 
+### 📦 Build Options
+
+The server can be built in multiple ways depending on your deployment needs:
+
+#### Option 1: Bundled JS (Recommended) - 145 KB
+Best for cloud deployments and systems with Bun installed:
+```bash
+bun run build:bundle   # Creates dist/index.js
+bun dist/index.js      # Run the server
+```
+
+#### Option 2: Standalone Executable - 55 MB
+For systems without Bun (includes full runtime):
+```bash
+bun run build          # Creates yahoo-mcp executable
+./yahoo-mcp            # Run directly
+```
+
+#### Option 3: Development Mode
+For local development (no build needed):
+```bash
+bun run dev            # Run directly from source
+```
+
+**Size Comparison:**
+- Source files: 164 KB
+- Bundled JS: 145 KB
+- Compiled binary: 55 MB (includes Bun runtime)
+
+**Recommendation**: Use `build:bundle` for Railway/cloud deployments (397x smaller!)
+
+See [BUILD_OPTIONS.md](BUILD_OPTIONS.md) for detailed comparison and use cases.
+
 ## ⚡ Quick Start
 
 ### 1. Create Yahoo Developer Application

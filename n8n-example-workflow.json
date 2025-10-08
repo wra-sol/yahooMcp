@@ -1,0 +1,57 @@
+{
+  "name": "Yahoo Fantasy MCP - Example Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "operation",
+              "value": "call_tool"
+            },
+            {
+              "name": "tool_name",
+              "value": "get_user_leagues"
+            }
+          ],
+          "object": [
+            {
+              "name": "arguments",
+              "value": "={ \"gameKey\": \"nhl\" }"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const MCP_SERVER_URL = 'https://yahoo-mcp-production.up.railway.app/mcp/message';\n\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const operation = item.json.operation || 'list_tools';\n  const toolName = item.json.tool_name;\n  const toolArguments = item.json.arguments || {};\n  \n  try {\n    let requestBody;\n    \n    if (operation === 'list_tools') {\n      requestBody = {\n        jsonrpc: '2.0',\n        id: Date.now(),\n        method: 'tools/list',\n        params: {}\n      };\n    } else if (operation === 'call_tool') {\n      if (!toolName) {\n        throw new Error('tool_name is required for call_tool operation');\n      }\n      \n      requestBody = {\n        jsonrpc: '2.0',\n        id: Date.now(),\n        method: 'tools/call',\n        params: {\n          name: toolName,\n          arguments: toolArguments\n        }\n      };\n    } else {\n      throw new Error(`Unknown operation: ${operation}`);\n    }\n    \n    const response = await fetch(MCP_SERVER_URL, {\n      method: 'POST',\n      headers: {\n        'Content-Type': 'application/json'\n      },\n      body: JSON.stringify(requestBody)\n    });\n    \n    if (!response.ok) {\n      throw new Error(`HTTP ${response.status}: ${response.statusText}`);\n    }\n    \n    const data = await response.json();\n    \n    if (data.error) {\n      throw new Error(`MCP Error (${data.error.code}): ${data.error.message}`);\n    }\n    \n    results.push({\n      json: {\n        success: true,\n        operation: operation,\n        tool_name: toolName,\n        result: data.result,\n        raw_response: data\n      }\n    });\n    \n  } catch (error) {\n    results.push({\n      json: {\n        success: false,\n        operation: operation,\n        tool_name: toolName,\n        error: error.message,\n        error_details: error.stack\n      }\n    });\n  }\n}\n\nreturn results;"
+      },
+      "name": "MCP Client Code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Set Input", "type": "main", "index": 0 }]]
+    },
+    "Set Input": {
+      "main": [[{ "node": "MCP Client Code", "type": "main", "index": 0 }]]
+    }
+  }
+}
+

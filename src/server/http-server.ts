@@ -514,6 +514,12 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
     }
 
     try {
+      // Check if request has a body
+      const contentLength = req.headers.get('content-length');
+      if (!contentLength || contentLength === '0') {
+        throw new Error('Empty request body. Expected JSON-RPC message.');
+      }
+      
       const message = await req.json();
       console.error(`[MCP] Received message: ${message.method} (id: ${message.id})`);
       
