@@ -531,20 +531,8 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       const result = await this.mcpServer.handleJsonRpcRequest(message);
       console.error(`[MCP] Sending response for id: ${message.id}`);
       
-      // Send response through SSE stream if session exists, otherwise return HTTP response
-      if (sessionId && this.sseClients.has(sessionId)) {
-        console.error(`[MCP] Sending response through SSE session: ${sessionId}`);
-        this.sendSseMessage(sessionId, result);
-        // Return 202 Accepted to indicate message was received
-        return new Response('', { 
-          status: 202,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-          }
-        });
-      }
-      
-      // Fallback: Return response via HTTP for non-SSE clients
+      // Standard MCP SSE: Always return response in HTTP body
+      // SSE stream is only for server-initiated notifications
       return new Response(JSON.stringify(result), {
         headers: { 
           'Content-Type': 'application/json',
@@ -564,12 +552,7 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
         }
       };
       
-      const sessionId = req.headers.get('X-Session-Id');
-      if (sessionId && this.sseClients.has(sessionId)) {
-        this.sendSseMessage(sessionId, errorResponse);
-        return new Response('', { status: 202 });
-      }
-      
+      // Standard MCP SSE: Always return errors in HTTP body
       return new Response(JSON.stringify(errorResponse), {
         status: 500,
         headers: { 
