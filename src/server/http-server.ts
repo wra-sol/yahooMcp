@@ -512,10 +512,21 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       });
     }
 
-    const sessionId = req.headers.get('X-Session-Id') || undefined;
+    let sessionId = req.headers.get('X-Session-Id') || undefined;
     let message: any;
 
     try {
+      // Attempt to extract session id from query parameters if header is unavailable
+      try {
+        const requestUrl = new URL(req.url);
+        sessionId = sessionId
+          || requestUrl.searchParams.get('sessionId')
+          || requestUrl.searchParams.get('SessionId')
+          || undefined;
+      } catch (parseError) {
+        console.error('[MCP] Failed to parse request URL for sessionId:', parseError);
+      }
+
       // Check if request has a body
       const contentLength = req.headers.get('content-length');
       if (!contentLength || contentLength === '0') {
@@ -524,6 +535,11 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       
       message = await req.json();
       console.error(`[MCP] Received message: ${message.method} (id: ${message.id})`);
+
+      // Allow clients to provide sessionId within the JSON payload
+      if (!sessionId && message?.params?.sessionId) {
+        sessionId = message.params.sessionId;
+      }
       
       // Handle the JSON-RPC request
       // Authentication is checked by individual tools when they need to make Yahoo API calls

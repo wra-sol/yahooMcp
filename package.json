@@ -14,8 +14,12 @@
     "build:small": "bun build src/index.ts --outdir ./dist --target bun --minify && echo '#!/usr/bin/env bun' > dist/yahoo-mcp && cat dist/index.js >> dist/yahoo-mcp && chmod +x dist/yahoo-mcp",
     "lint": "eslint src/**/*.ts",
     "test": "bun test",
+    "test:mcp": "bun run test-mcp-integration.ts",
+    "test:mcp:remote": "SERVER_URL=https://yahoo-mcp-production.up.railway.app bun run test-mcp-integration.ts",
     "test:sse": "bun run test-sse-connection.ts",
+    "test:sse:flow": "bun run test-sse-flow.ts",
     "test:sse:remote": "SERVER_URL=https://yahoo-mcp-production.up.railway.app bun run test-sse-connection.ts",
+    "test:all": "bun run test-mcp-integration.ts && bun run test-sse-flow.ts",
     "size": "ls -lh yahoo-mcp dist/yahoo-mcp dist/index.js 2>/dev/null || echo 'No builds found'"
   },
   "keywords": [
