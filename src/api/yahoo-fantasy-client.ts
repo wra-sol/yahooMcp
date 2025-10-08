@@ -753,20 +753,34 @@ export class YahooFantasyClient {
     const endpoint = `/team/${teamKey}/roster${weekParam}`;
     const response = await this.makeRequest<any>('GET', endpoint);
     
+    console.error(`🔍 getTeamRoster DEBUG - teamKey: ${teamKey}, week: ${week || 'current'}`);
+    console.error(`   Response keys:`, response ? Object.keys(response) : 'null/undefined');
+    
     // Team endpoints wrap data in team array: { team: [{ ...data..., roster: { players: {...} } }] }
     const teamArray = response.team;
+    console.error(`   teamArray type:`, Array.isArray(teamArray) ? 'array' : typeof teamArray);
+    
     if (Array.isArray(teamArray)) {
-      for (const item of teamArray) {
-        if (item.roster?.players) {
-          const parsed = this.parseYahooCollection<Player>(item.roster.players, 'player');
-          return {
-            players: parsed.items,
-            count: parsed.count,
-          };
+      console.error(`   teamArray length:`, teamArray.length);
+      for (let i = 0; i < teamArray.length; i++) {
+        const item = teamArray[i];
+        console.error(`   teamArray[${i}] keys:`, item ? Object.keys(item) : 'null/undefined');
+        if (item.roster) {
+          console.error(`      roster keys:`, Object.keys(item.roster));
+          if (item.roster.players) {
+            console.error(`      players keys:`, Object.keys(item.roster.players));
+            const parsed = this.parseYahooCollection<Player>(item.roster.players, 'player');
+            console.error(`      parsed ${parsed.count} players`);
+            return {
+              players: parsed.items,
+              count: parsed.count,
+            };
+          }
         }
       }
     }
     
+    console.error(`   ⚠️  No roster data found - returning empty array`);
     return { players: [], count: 0 };
   }
 
