@@ -152,11 +152,16 @@ export class YahooFantasyClient {
     const url = `${this.baseUrl}${endpoint}${separator}format=json`;
     const authHeader = this.oauthClient.createAuthHeader(method, url, data);
 
+    // Detect if data is XML (starts with <?xml)
+    const isXmlData = typeof data === 'string' && data.trim().startsWith('<?xml');
+    
     const fetchOptions: RequestInit = {
       method,
       headers: {
         ...authHeader,
-        'Content-Type': 'application/json',
+        // Yahoo API requires application/xml for POST requests with XML data
+        // But we can still request JSON response via ?format=json
+        'Content-Type': isXmlData ? 'application/xml' : 'application/json',
         'Accept': 'application/json',
       },
     };
