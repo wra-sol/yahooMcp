@@ -660,6 +660,31 @@ export class YahooFantasyClient {
     const endpoint = `/league/${leagueKey}/scoreboard${weekParam}`;
     const response = await this.makeRequest<any>('GET', endpoint);
 
+    // Check if response has league array structure (similar to team endpoints)
+    if (response.league && Array.isArray(response.league)) {
+      for (const item of response.league) {
+        if (item.scoreboard) {
+          const matchupsCollection = item.scoreboard.matchups;
+          if (matchupsCollection && typeof matchupsCollection === 'object') {
+            const matchups: any[] = [];
+            for (const key in matchupsCollection) {
+              if (key === 'count') continue;
+              const matchupData = matchupsCollection[key]?.matchup;
+              if (!matchupData) continue;
+              if (Array.isArray(matchupData)) {
+                matchups.push(matchupData);
+              } else {
+                matchups.push([matchupData]);
+              }
+            }
+            const count = Number(matchupsCollection.count ?? matchups.length);
+            return { matchups, count };
+          }
+        }
+      }
+    }
+
+    // Fallback: check for direct scoreboard.matchups property
     const matchupsCollection = response.scoreboard?.matchups;
     if (!matchupsCollection || typeof matchupsCollection !== 'object') {
       return { matchups: [], count: 0 };
@@ -753,24 +778,32 @@ export class YahooFantasyClient {
     const endpoint = `/team/${teamKey}/roster${weekParam}`;
     const response = await this.makeRequest<any>('GET', endpoint);
     
-    console.error(`🔍 getTeamRoster DEBUG - teamKey: ${teamKey}, week: ${week || 'current'}`);
-    console.error(`   Response keys:`, response ? Object.keys(response) : 'null/undefined');
-    
-    // Team endpoints wrap data in team array: { team: [{ ...data..., roster: { players: {...} } }] }
+    // Yahoo roster structure is deeply nested:
+    // response.team = [
+    //   { team_key, team_id, name, ... },  // team metadata
+    //   {
+    //     roster: {
+    //       "0": {
+    //         "players": {
+    //           "0": { "player": [...] },
+    //           "1": { "player": [...] },
+    //           "count": N
+    //         }
+    //       },
+    //       "coverage_type": "...",
+    //       "date": "..."
+    //     }
+    //   }
+    // ]
     const teamArray = response.team;
-    console.error(`   teamArray type:`, Array.isArray(teamArray) ? 'array' : typeof teamArray);
     
     if (Array.isArray(teamArray)) {
-      console.error(`   teamArray length:`, teamArray.length);
-      for (let i = 0; i < teamArray.length; i++) {
-        const item = teamArray[i];
-        console.error(`   teamArray[${i}] keys:`, item ? Object.keys(item) : 'null/undefined');
+      for (const item of teamArray) {
         if (item.roster) {
-          console.error(`      roster keys:`, Object.keys(item.roster));
-          if (item.roster.players) {
-            console.error(`      players keys:`, Object.keys(item.roster.players));
-            const parsed = this.parseYahooCollection<Player>(item.roster.players, 'player');
-            console.error(`      parsed ${parsed.count} players`);
+          // The player collection is at roster["0"].players
+          const rosterEntry = item.roster["0"];
+          if (rosterEntry && rosterEntry.players) {
+            const parsed = this.parseYahooCollection<Player>(rosterEntry.players, 'player');
             return {
               players: parsed.items,
               count: parsed.count,
@@ -780,7 +813,6 @@ export class YahooFantasyClient {
       }
     }
     
-    console.error(`   ⚠️  No roster data found - returning empty array`);
     return { players: [], count: 0 };
   }
 
@@ -792,6 +824,29 @@ export class YahooFantasyClient {
     const endpoint = `/team/${teamKey}/matchups${weekParam}`;
     const response = await this.makeRequest<any>('GET', endpoint);
 
+    // Check if response has team array structure (like roster endpoint)
+    if (response.team && Array.isArray(response.team)) {
+      for (const item of response.team) {
+        if (item.matchups) {
+          const matchupsCollection = item.matchups;
+          const matchups: any[] = [];
+          for (const key in matchupsCollection) {
+            if (key === 'count') continue;
+            const matchupData = matchupsCollection[key]?.matchup;
+            if (!matchupData) continue;
+            if (Array.isArray(matchupData)) {
+              matchups.push(matchupData);
+            } else {
+              matchups.push([matchupData]);
+            }
+          }
+          const count = Number(matchupsCollection.count ?? matchups.length);
+          return { matchups, count };
+        }
+      }
+    }
+
+    // Fallback: check for direct matchups property
     const matchupsCollection = response.matchups;
     if (!matchupsCollection || typeof matchupsCollection !== 'object') {
       return { matchups: [], count: 0 };

@@ -1689,6 +1689,63 @@ export class FantasyTools {
 
   private flattenYahooObjectArray(items: any[]): Record<string, any> {
     const result: Record<string, any> = {};
+    
+    if (!items || !Array.isArray(items)) {
+      return result;
+    }
+    
+    // Yahoo has TWO different formats:
+    // Format 1: [ [{prop1}, {prop2}, ...] ] - items[0] is itself an array of property objects
+    // Format 2: [ { "0": {...}, "1": {...} } ] - items[0] is an object with numeric keys
+    
+    // Handle Format 1: If items[0] is an array, flatten that array directly
+    if (items.length > 0 && Array.isArray(items[0])) {
+      for (const item of items[0]) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          continue;
+        }
+        for (const [key, value] of Object.entries(item)) {
+          if (result[key] === undefined) {
+            result[key] = value;
+          }
+        }
+      }
+      return result;
+    }
+    
+    // Handle Format 2: Yahoo nested numeric-keyed objects
+    if (items.length === 1 && typeof items[0] === 'object' && !Array.isArray(items[0])) {
+      const firstItem = items[0];
+      const keys = Object.keys(firstItem);
+      const numericKeys = keys.filter(k => /^\d+$/.test(k));
+      
+      // If we have numeric keys, extract their values and flatten
+      if (numericKeys.length > 0) {
+        for (const key of numericKeys.sort((a, b) => Number(a) - Number(b))) {
+          const val = firstItem[key];
+          if (val && typeof val === 'object' && !Array.isArray(val)) {
+            for (const [k, v] of Object.entries(val)) {
+              if (result[k] === undefined) {
+                result[k] = v;
+              }
+            }
+          }
+        }
+        
+        // Also include any non-numeric keys directly
+        for (const key of keys) {
+          if (!/^\d+$/.test(key) && result[key] === undefined) {
+            result[key] = firstItem[key];
+          }
+        }
+        
+        if (Object.keys(result).length > 0) {
+          return result;
+        }
+      }
+    }
+    
+    // Standard flattening for normal arrays
     for (const item of items || []) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) {
         continue;
@@ -1721,24 +1778,39 @@ export class FantasyTools {
 
   private parseTeamPlayers(teamResponse: any): any[] {
     const teamArray = Array.isArray(teamResponse?.team) ? teamResponse.team : [];
+    
+    // Check for roster structure first (from /roster endpoint): roster["0"].players
+    const rosterEntry = teamArray.find((entry: any) => entry?.roster);
+    if (rosterEntry && rosterEntry.roster && rosterEntry.roster["0"] && rosterEntry.roster["0"].players) {
+      const playersContainer = rosterEntry.roster["0"].players;
+      return this.parsePlayersFromContainer(playersContainer);
+    }
+    
+    // Fallback: look for direct players property (from ;out=players)
     const playersContainerEntry = teamArray.find((entry: any) => entry?.players);
     const playersContainer = playersContainerEntry?.players;
     if (!playersContainer || typeof playersContainer !== 'object') {
-      console.error('⚠️  parseTeamPlayers: No valid players container found');
-      if (teamResponse && typeof teamResponse === 'object') {
-        console.error('   Team response keys:', Object.keys(teamResponse));
-      }
       return [];
     }
 
+    return this.parsePlayersFromContainer(playersContainer);
+  }
+
+  private parsePlayersFromContainer(playersContainer: any): any[] {
     const players: any[] = [];
     for (const key in playersContainer) {
       if (key === 'count') continue;
-      const playerEntryArray = playersContainer[key]?.player;
-      if (!Array.isArray(playerEntryArray)) {
-        console.error(`⚠️  parseTeamPlayers: Player entry ${key} is not an array:`, typeof playerEntryArray);
+      
+      const entry = playersContainer[key];
+      if (!entry || typeof entry !== 'object') {
         continue;
       }
+      
+      const playerEntryArray = entry.player;
+      if (!Array.isArray(playerEntryArray)) {
+        continue;
+      }
+      
       const flattened = this.flattenYahooObjectArray(playerEntryArray);
       const eligibility = Array.isArray(flattened.eligible_positions)
         ? flattened.eligible_positions.map((pos: any) => pos?.position).filter(Boolean)
@@ -1905,3 +1977,4 @@ export class FantasyTools {
     return null;
   }
 }
+
