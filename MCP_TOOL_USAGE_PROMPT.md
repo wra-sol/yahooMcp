@@ -9,6 +9,17 @@ You have access to the Yahoo Fantasy Sports API through an MCP (Model Context Pr
 - **Headers**: `Content-Type: application/json`
 - **Protocol**: JSON-RPC 2.0
 
+## ⚠️ Important: Yahoo API Data Format
+
+**Yahoo Fantasy API uses a unique response structure:**
+
+- Collections are returned as **objects with numeric keys**, not arrays
+- Example: `{ "0": {team: {...}}, "1": {team: {...}}, "count": 2 }`
+- The MCP server automatically parses these into arrays for you
+- All tools return data in standard array format: `{ teams: [...], count: N }`
+
+**You don't need to worry about this** - the client handles it transparently. Just know that if you're debugging raw responses, they look different than the processed data.
+
 ## 📋 Available Operations
 
 ### 1. List All Available Tools
@@ -134,12 +145,32 @@ To execute any Yahoo Fantasy operation:
 }
 ```
 **Returns**: Current matchup details for specific team
-
+ 
 ---
-
+ 
+### Get Team Context (Fetcher Package)
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "get_team_context",
+    "arguments": {
+      "leagueKey": "465.l.27830",
+      "teamKey": "465.l.27830.t.10"
+    }
+  }
+}
+```
+**Returns**: Fully structured TEAM_CONTEXT JSON (league settings, roster snapshot, matchup summary) ready for downstream Fetcher agents.
+ 
+---
+ 
 ### Get Free Agents
 ```json
 {
+
   "jsonrpc": "2.0",
   "id": 1,
   "method": "tools/call",

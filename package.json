@@ -19,6 +19,8 @@
     "test:sse": "bun run test-sse-connection.ts",
     "test:sse:flow": "bun run test-sse-flow.ts",
     "test:sse:remote": "SERVER_URL=https://yahoo-mcp-production.up.railway.app bun run test-sse-connection.ts",
+    "test:n8n": "bun run test-n8n-http-approach.ts",
+    "test:n8n:remote": "SERVER_URL=https://yahoo-mcp-production.up.railway.app bun run test-n8n-http-approach.ts",
     "test:all": "bun run test-mcp-integration.ts && bun run test-sse-flow.ts",
     "size": "ls -lh yahoo-mcp dist/yahoo-mcp dist/index.js 2>/dev/null || echo 'No builds found'"
   },

@@ -27,6 +27,7 @@ You have access to 30+ specialized tools for Yahoo Fantasy Sports. Key tools inc
 | `get_league_scoreboard` | Current week matchups | Matchup context, current week |
 | `get_team_matchups` | Specific team matchup | Opponent analysis, scoring |
 | `get_team_stats` | Team performance stats | Team evaluation |
+| `get_team_context` | Fetcher-ready team context package | Full context handoff |
 | `get_player` | Detailed player info | Player lookup |
 | `get_player_stats` | Player statistics | Performance analysis |
 | `get_player_notes` | Yahoo editorial content | Injury updates, news |
@@ -75,12 +76,25 @@ When a user or agent requests team information, execute this complete workflow:
     "tool": "get_league_scoreboard",
     "arguments": { "leagueKey": "465.l.27830" }
   },
-{
-  "tool": "get_team_matchups",
+  {
+    "tool": "get_team_matchups",
     "arguments": { "teamKey": "465.l.27830.t.10" }
   }
 ]
 ```
+
+#### Step 3: Unified Fetch (Preferred for Automation)
+```json
+{
+  "tool": "get_team_context",
+  "arguments": {
+    "leagueKey": "465.l.27830",
+    "teamKey": "465.l.27830.t.10"
+  }
+}
+```
+
+**Result**: Returns the fully structured TEAM_CONTEXT package ready for handoff. Use this after authentication to minimize tool calls and maintain Fetcher compliance.
 
 **Extract from `get_league_settings`:**
 - Scoring categories and weights
@@ -507,22 +521,21 @@ When presenting to users, use clean markdown:
    ✓ Found: "Fantasy Champions" (465.l.27830)
    ✓ Team: "Team Awesome" (465.l.27830.t.10)
 
-2. PARALLEL DATA FETCH (4 simultaneous calls)
+2. PARALLEL DATA FETCH (legacy)
    → get_league_settings("465.l.27830")
    → get_team_roster("465.l.27830.t.10")
    → get_league_scoreboard("465.l.27830")
    → get_team_matchups("465.l.27830.t.10")
-
-3. VALIDATE & STRUCTURE
+ 
+3. UNIFIED CONTEXT (preferred)
+   → get_team_context("465.l.27830", "465.l.27830.t.10")
+   ✓ Returned Fetcher-compliant TEAM_CONTEXT package
+ 
+4. VALIDATE & STRUCTURE (lightweight)
    ✓ All keys valid
-   ✓ Data complete (100%)
    ✓ Calculated: 2 empty roster spots
    ✓ Calculated: 2 weekly adds remaining
-
-4. OUTPUT: Team Context Package (JSON)
-   → Structured for Recommendations Agent
-   → Priority: Fill roster spots, position gap at RW
-
+ 
 5. HANDOFF
    → recommendations_agent with full context
 ```

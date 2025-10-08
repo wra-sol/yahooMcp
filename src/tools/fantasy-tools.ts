@@ -114,6 +114,7 @@ export class FantasyTools {
       this.getInjuredReserveTool(),
       this.getFreeAgentsTool(),
       this.getTeamStatsTool(),
+      this.getTeamContextTool(),
       this.getWaiverClaimsTool(),
       this.addPlayerTool(),
       this.dropPlayerTool(),
@@ -847,8 +848,41 @@ export class FantasyTools {
       },
     };
   }
-
+ 
+  private getTeamContextTool(): Tool {
+    return {
+      name: 'get_team_context',
+      description: 'Build a Fetcher-compliant team context package combining league settings, roster, and matchup snapshot.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          leagueKey: {
+            type: 'string',
+            description: 'League key (e.g., "465.l.27830")',
+          },
+          teamKey: {
+            type: 'string',
+            description: 'Team key (e.g., "465.l.27830.t.10")',
+          },
+          options: {
+            type: 'object',
+            properties: {
+              week: {
+                type: 'string',
+                description: 'Optional scoring week to target. Defaults to current week.',
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+        required: ['leagueKey', 'teamKey'],
+        additionalProperties: false,
+      },
+    };
+  }
+ 
   private getWaiverClaimsTool(): Tool {
+
     return {
       name: 'get_waiver_claims',
       description: 'Get pending waiver claims for a specific team',
@@ -1435,9 +1469,13 @@ export class FantasyTools {
             week: args.week,
             date: args.date,
           });
-
+ 
+        case 'get_team_context':
+          return await this.buildTeamContext(args.leagueKey, args.teamKey, args.options);
+ 
         case 'get_waiver_claims':
           return await this.client.getWaiverClaims(args.teamKey);
+
 
         case 'add_player':
           return await this.client.addPlayer(args.leagueKey, args.teamKey, args.playerKey);
@@ -1521,5 +1559,342 @@ export class FantasyTools {
     } catch (error: any) {
       throw new Error(`Tool execution failed: ${error.message}`);
     }
+  }
+
+  private async buildTeamContext(
+    leagueKey: string,
+    teamKey: string,
+    options?: { week?: string }
+  ): Promise<any> {
+    const week = options?.week;
+
+    const [leagueSettingsRaw, teamWithPlayers, scoreboardResult, teamMatchupsResult] = await Promise.all([
+      this.client.getLeagueSettings(leagueKey) as any,
+      this.client.getTeam(teamKey, { players: true }) as any,
+      this.client.getLeagueScoreboard(leagueKey, week),
+      this.client.getTeamMatchups(teamKey, week),
+    ]);
+
+    const leagueArray = Array.isArray(leagueSettingsRaw?.league) ? leagueSettingsRaw.league : [];
+    const leagueMeta = leagueArray[0] ?? {};
+    const settingsSection = leagueArray.find((entry: any) => entry?.settings)?.settings ?? [];
+    const primarySettings = Array.isArray(settingsSection) ? settingsSection[0] ?? {} : {};
+
+    const rosterSummary = this.parseRosterPositionsSummary(primarySettings.roster_positions);
+    const statCategories = (primarySettings.stat_categories?.stats ?? [])
+      .map((stat: any) => stat?.stat?.display_name ?? stat?.stat?.abbr)
+      .filter(Boolean);
+
+    const teamArray = Array.isArray(teamWithPlayers?.team) ? teamWithPlayers.team : [];
+    const teamMetaArray = Array.isArray(teamArray[0]) ? teamArray[0] : [];
+    const teamMeta = this.flattenYahooObjectArray(teamMetaArray);
+    const players = this.parseTeamPlayers(teamWithPlayers);
+
+    const totalSpots = rosterSummary.total || players.length;
+    const availableSpots = Math.max(totalSpots - players.length, 0);
+
+    const weeklyAddsLimit = primarySettings.max_weekly_adds ? Number(primarySettings.max_weekly_adds) : null;
+    const weeklyAddsUsed = teamMeta.roster_adds?.value ? Number(teamMeta.roster_adds.value) : null;
+    const weeklyAddsRemaining =
+      weeklyAddsLimit !== null && weeklyAddsUsed !== null
+        ? Math.max(weeklyAddsLimit - weeklyAddsUsed, 0)
+        : null;
+
+    const filledPositions = this.summarizeFilledPositions(players);
+
+    const scoreboardMatchup = this.findMatchupForTeam(teamKey, scoreboardResult.matchups);
+    const teamMatchup = this.findMatchupForTeam(teamKey, teamMatchupsResult.matchups);
+    const chosenMatchup = scoreboardMatchup || teamMatchup;
+
+    const currentWeek = Number(leagueMeta.current_week || chosenMatchup?.week || 0) || null;
+
+    const errors: string[] = [];
+    if (!players.length) {
+      errors.push('Team roster returned zero players from Yahoo API.');
+    }
+    if (!scoreboardResult.matchups.length) {
+      errors.push('League scoreboard returned no current matchups.');
+    }
+
+    const dataComplete = Boolean(players.length && statCategories.length && scoreboardResult.matchups.length);
+
+    return {
+      fetch_type: 'TEAM_CONTEXT',
+      status: 'SUCCESS',
+      timestamp: new Date().toISOString(),
+      request: {
+        sport: leagueMeta.game_code || 'nhl',
+        league_name: leagueMeta.name || null,
+        league_url: leagueMeta.url || null,
+      },
+      identifiers: {
+        league_key: leagueMeta.league_key || leagueKey,
+        team_key: teamMeta.team_key || teamKey,
+        team_name: teamMeta.name || null,
+        game_key: leagueMeta.game_code || null,
+      },
+      league_settings: {
+        scoring_type: this.normalizeScoringType(leagueMeta.scoring_type || primarySettings.scoring_type),
+        scoring_categories: statCategories,
+        roster_positions: rosterSummary.positions,
+        transaction_limits: {
+          weekly_adds_limit: weeklyAddsLimit,
+          weekly_adds_used: weeklyAddsUsed,
+          weekly_adds_remaining: weeklyAddsRemaining,
+        },
+        waiver_rules: {
+          type: this.deriveWaiverType(primarySettings.waiver_type),
+          budget: primarySettings.uses_faab === '1' ? Number(primarySettings.faab_budget ?? 0) : null,
+          budget_remaining: primarySettings.uses_faab === '1' ? Number(primarySettings.faab_remaining ?? 0) : null,
+          waiver_time_days: primarySettings.waiver_time ? Number(primarySettings.waiver_time) : null,
+        },
+        lock_type: this.normalizeLockType(leagueMeta.weekly_deadline),
+        trade_deadline: primarySettings.trade_end_date || null,
+      },
+      current_roster: {
+        total_spots: totalSpots,
+        filled_spots: players.length,
+        available_spots: availableSpots,
+        players,
+        position_analysis: {
+          filled_positions: filledPositions,
+          bench: null,
+          ir: null,
+          notes: 'Lineup positions not provided by Yahoo response; counts derived from listed player positions only.',
+        },
+      },
+      current_matchup: {
+        week: chosenMatchup?.week ?? currentWeek,
+        opponent: chosenMatchup?.opponent ?? null,
+        scores: chosenMatchup?.scores ?? null,
+        status: chosenMatchup?.status ?? (scoreboardMatchup ? 'in_progress' : 'not_started'),
+      },
+      validation: {
+        all_keys_valid: Boolean((leagueMeta.league_key || leagueKey) && (teamMeta.team_key || teamKey)),
+        data_complete: dataComplete,
+        errors,
+      },
+      for_agent: {
+        recommendations_agent: {
+          action_required: availableSpots > 0,
+          priority: availableSpots > 0 ? `Fill ${availableSpots} open roster spots` : 'Monitor roster composition',
+        },
+        manager_agent: {
+          transaction_capacity: weeklyAddsRemaining,
+          ready_for_execution: weeklyAddsRemaining !== null ? weeklyAddsRemaining > 0 : null,
+        },
+      },
+    };
+  }
+
+  private flattenYahooObjectArray(items: any[]): Record<string, any> {
+    const result: Record<string, any> = {};
+    for (const item of items || []) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        continue;
+      }
+      for (const [key, value] of Object.entries(item)) {
+        if (result[key] === undefined) {
+          result[key] = value;
+        }
+      }
+    }
+    return result;
+  }
+
+  private parseRosterPositionsSummary(rosterPositionsRaw: any): { positions: Record<string, number>; total: number } {
+    const positions: Record<string, number> = {};
+    let total = 0;
+    if (Array.isArray(rosterPositionsRaw)) {
+      for (const item of rosterPositionsRaw) {
+        const rosterPosition = item?.roster_position ?? item;
+        if (!rosterPosition) continue;
+        const position = rosterPosition.position;
+        const count = Number(rosterPosition.count ?? 0);
+        if (!position) continue;
+        positions[position] = count;
+        total += count;
+      }
+    }
+    return { positions, total };
+  }
+
+  private parseTeamPlayers(teamResponse: any): any[] {
+    const teamArray = Array.isArray(teamResponse?.team) ? teamResponse.team : [];
+    const playersContainerEntry = teamArray.find((entry: any) => entry?.players);
+    const playersContainer = playersContainerEntry?.players;
+    if (!playersContainer || typeof playersContainer !== 'object') {
+      return [];
+    }
+
+    const players: any[] = [];
+    for (const key in playersContainer) {
+      if (key === 'count') continue;
+      const playerEntryArray = playersContainer[key]?.player;
+      if (!Array.isArray(playerEntryArray)) continue;
+      const flattened = this.flattenYahooObjectArray(playerEntryArray);
+      const eligibility = Array.isArray(flattened.eligible_positions)
+        ? flattened.eligible_positions.map((pos: any) => pos?.position).filter(Boolean)
+        : [];
+      const eligibleToAdd = Array.isArray(flattened.eligible_positions_to_add)
+        ? flattened.eligible_positions_to_add.map((pos: any) => pos?.position).filter(Boolean)
+        : [];
+
+      players.push({
+        player_key: flattened.player_key || null,
+        name: flattened.name?.full || null,
+        position: flattened.display_position || flattened.primary_position || null,
+        team: flattened.editorial_team_abbr || flattened.editorial_team_full_name || null,
+        lineup_position: flattened.selected_position?.position || null,
+        injury_status: flattened.status || flattened.injury_status || null,
+        eligibility,
+        eligible_positions_to_add: eligibleToAdd,
+      });
+    }
+    return players;
+  }
+
+  private summarizeFilledPositions(players: Array<{ position: string | null }>): Record<string, number> {
+    const summary: Record<string, number> = {};
+    for (const player of players) {
+      if (!player.position) continue;
+      const positionTokens = player.position.split(',').map((token) => token.trim()).filter(Boolean);
+      for (const token of positionTokens) {
+        summary[token] = (summary[token] || 0) + 1;
+      }
+    }
+    return summary;
+  }
+
+  private deriveWaiverType(code?: string): string | null {
+    if (!code) return null;
+    switch (code) {
+      case 'R':
+        return 'rolling';
+      case 'F':
+        return 'faab';
+      case 'V':
+        return 'continual';
+      default:
+        return code;
+    }
+  }
+
+  private normalizeScoringType(type?: string | null): string | null {
+    if (!type) return null;
+    const normalized = String(type).toLowerCase();
+    if (normalized === 'head') return 'head-to-head-category';
+    if (normalized === 'points') return 'head-to-head-points';
+    return type;
+  }
+
+  private normalizeLockType(deadline?: string | null): string | null {
+    if (!deadline) return null;
+    const normalized = String(deadline).toLowerCase();
+    if (normalized === 'intraday') return 'daily';
+    if (normalized === 'weekly') return 'weekly';
+    return deadline;
+  }
+
+  private findMatchupForTeam(teamKey: string, matchups: any[]): {
+    week: number | null;
+    status: string | null;
+    opponent: { team_key: string | null; team_name: string | null } | null;
+    scores: { your_team: number | null; opponent: number | null } | null;
+  } | null {
+    if (!Array.isArray(matchups)) {
+      return null;
+    }
+
+    for (const matchupEntry of matchups) {
+      if (!Array.isArray(matchupEntry)) {
+        continue;
+      }
+
+      const metadata = this.flattenYahooObjectArray(matchupEntry);
+      const teamsContainer =
+        metadata.teams || matchupEntry.find((item: any) => item?.teams)?.teams || null;
+      const teams = this.parseMatchupTeams(teamsContainer);
+      if (!teams.length) continue;
+
+      const selfTeam = teams.find((team) => team.team_key === teamKey);
+      if (!selfTeam) continue;
+      const opponentTeam = teams.find((team) => team.team_key !== teamKey) || null;
+
+      const weekValue =
+        metadata.week ??
+        metadata.matchup_week ??
+        metadata.week_number ??
+        metadata.week_start ??
+        null;
+      const weekNumber = weekValue ? Number(weekValue) || null : null;
+
+      return {
+        week: weekNumber,
+        status: metadata.status || null,
+        opponent: opponentTeam
+          ? {
+              team_key: opponentTeam.team_key || null,
+              team_name: opponentTeam.name || null,
+            }
+          : null,
+        scores: this.buildScorePayload(selfTeam, opponentTeam),
+      };
+    }
+
+    return null;
+  }
+
+  private parseMatchupTeams(teamsContainer: any): Array<Record<string, any>> {
+    const teams: Record<string, any>[] = [];
+    if (!teamsContainer || typeof teamsContainer !== 'object') {
+      return teams;
+    }
+
+    for (const key in teamsContainer) {
+      if (key === 'count') continue;
+      const teamEntry = teamsContainer[key]?.team;
+      if (Array.isArray(teamEntry)) {
+        teams.push(this.flattenYahooObjectArray(teamEntry));
+      } else if (teamEntry && typeof teamEntry === 'object') {
+        teams.push(teamEntry);
+      }
+    }
+
+    return teams;
+  }
+
+  private buildScorePayload(
+    selfTeam: Record<string, any> | null,
+    opponentTeam: Record<string, any> | null
+  ): { your_team: number | null; opponent: number | null } | null {
+    const yourScore = this.extractTeamScore(selfTeam);
+    const opponentScore = this.extractTeamScore(opponentTeam);
+    if (yourScore === null && opponentScore === null) {
+      return null;
+    }
+    return {
+      your_team: yourScore,
+      opponent: opponentScore,
+    };
+  }
+
+  private extractTeamScore(team: Record<string, any> | null): number | null {
+    if (!team) return null;
+    const points = team.team_points || team.points || team.score || null;
+    if (!points) return null;
+
+    if (typeof points === 'object') {
+      const total = points.total ?? points.points ?? points.value ?? points.score;
+      if (total !== undefined) {
+        const numeric = Number(total);
+        return Number.isFinite(numeric) ? numeric : null;
+      }
+    } else if (typeof points === 'string' || typeof points === 'number') {
+      const numeric = Number(points);
+      return Number.isFinite(numeric) ? numeric : null;
+    }
+
+    return null;
   }
 }

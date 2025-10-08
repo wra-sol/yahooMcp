@@ -615,13 +615,32 @@ export class YahooFantasyClient {
   /**
    * Get league scoreboard/matchups
    */
-  async getLeagueScoreboard(leagueKey: string, week?: string): Promise<{ matchups: Matchup[]; count: number }> {
+  async getLeagueScoreboard(leagueKey: string, week?: string): Promise<{ matchups: any[]; count: number }> {
     const weekParam = week ? `;week=${week}` : '';
     const endpoint = `/league/${leagueKey}/scoreboard${weekParam}`;
     const response = await this.makeRequest<any>('GET', endpoint);
+
+    const matchupsCollection = response.scoreboard?.matchups;
+    if (!matchupsCollection || typeof matchupsCollection !== 'object') {
+      return { matchups: [], count: 0 };
+    }
+
+    const matchups: any[] = [];
+    for (const key in matchupsCollection) {
+      if (key === 'count') continue;
+      const matchupData = matchupsCollection[key]?.matchup;
+      if (!matchupData) continue;
+      if (Array.isArray(matchupData)) {
+        matchups.push(matchupData);
+      } else {
+        matchups.push([matchupData]);
+      }
+    }
+
+    const count = Number(matchupsCollection.count ?? matchups.length);
     return {
-      matchups: response.scoreboard?.matchups || [],
-      count: response.scoreboard?.count || 0,
+      matchups,
+      count,
     };
   }
 
@@ -714,13 +733,32 @@ export class YahooFantasyClient {
   /**
    * Get team matchups
    */
-  async getTeamMatchups(teamKey: string, week?: string): Promise<{ matchups: Matchup[]; count: number }> {
+  async getTeamMatchups(teamKey: string, week?: string): Promise<{ matchups: any[]; count: number }> {
     const weekParam = week ? `;week=${week}` : '';
     const endpoint = `/team/${teamKey}/matchups${weekParam}`;
     const response = await this.makeRequest<any>('GET', endpoint);
+
+    const matchupsCollection = response.matchups;
+    if (!matchupsCollection || typeof matchupsCollection !== 'object') {
+      return { matchups: [], count: 0 };
+    }
+
+    const matchups: any[] = [];
+    for (const key in matchupsCollection) {
+      if (key === 'count') continue;
+      const matchupData = matchupsCollection[key]?.matchup;
+      if (!matchupData) continue;
+      if (Array.isArray(matchupData)) {
+        matchups.push(matchupData);
+      } else {
+        matchups.push([matchupData]);
+      }
+    }
+
+    const count = Number(matchupsCollection.count ?? matchups.length);
     return {
-      matchups: response.matchups || [],
-      count: response.count || 0,
+      matchups,
+      count,
     };
   }
 
