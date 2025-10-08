@@ -232,7 +232,61 @@ export class YahooFantasyClient {
    */
   async getUserGames(gameKeys?: string[]): Promise<GamesCollection> {
     const gameKeysParam = gameKeys ? `;game_keys=${gameKeys.join(',')}` : '';
-    return this.makeRequest<GamesCollection>('GET', `/users;use_login=1/games${gameKeysParam}`);
+    const response = await this.makeRequest<any>('GET', `/users;use_login=1/games${gameKeysParam}`);
+    
+    // Yahoo API returns deeply nested object structure with numeric keys:
+    // { users: { 0: { user: [{ guid: ... }, { games: { 0: { game: [...] }, count: N } }] } } }
+    
+    try {
+      const usersObj = response.users;
+      if (!usersObj || typeof usersObj !== 'object') {
+        return { games: [], count: 0 };
+      }
+      
+      // Get first user (users.0)
+      const firstUser = usersObj['0'] || usersObj[0];
+      if (!firstUser || !firstUser.user || !Array.isArray(firstUser.user)) {
+        return { games: [], count: 0 };
+      }
+      
+      // Find games object in user array
+      let gamesObj = null;
+      for (const item of firstUser.user) {
+        if (item.games) {
+          gamesObj = item.games;
+          break;
+        }
+      }
+      
+      if (!gamesObj || typeof gamesObj !== 'object') {
+        return { games: [], count: 0 };
+      }
+      
+      // Extract count
+      const gameCount = gamesObj.count || 0;
+      
+      // Extract game objects from numeric keys
+      const games: any[] = [];
+      for (const key in gamesObj) {
+        if (key !== 'count' && gamesObj[key]?.game) {
+          // game can be an array or object
+          const gameData = gamesObj[key].game;
+          if (Array.isArray(gameData) && gameData.length > 0) {
+            games.push(gameData[0]);
+          } else if (typeof gameData === 'object') {
+            games.push(gameData);
+          }
+        }
+      }
+      
+      return {
+        games,
+        count: gameCount || games.length,
+      };
+    } catch (error: any) {
+      console.error('❌ Error parsing getUserGames response:', error.message);
+      return { games: [], count: 0 };
+    }
   }
 
   /**
@@ -266,45 +320,106 @@ export class YahooFantasyClient {
   async getUserLeagues(gameKey: string): Promise<{ leagues: League[]; count: number }> {
     const response = await this.makeRequest<any>('GET', `/users;use_login=1/games;game_keys=${gameKey}/leagues`);
     
-    // Debug: log the full response structure
-    console.error('[DEBUG] getUserLeagues raw response:', JSON.stringify(response, null, 2));
-    
-    // Yahoo API returns leagues nested in users -> games structure
-    // Response structure: { users: { 0: { user: [{ games: { 0: { game: [{ leagues: [...] }] } } }] } } }
-    let leagues: League[] = [];
-    let count = 0;
+    // Yahoo API returns deeply nested object structure with numeric keys
     
     try {
-      if (response.users && response.users[0]) {
-        const userArray = response.users[0].user;
-        if (Array.isArray(userArray) && userArray[0]) {
-          const games = userArray[0].games;
-          if (games && games[0]) {
-            const gameArray = games[0].game;
-            if (Array.isArray(gameArray) && gameArray[0]) {
-              leagues = gameArray[0].leagues || [];
-              count = gameArray[0].count || 0;
-            }
-          }
+      const usersObj = response.users;
+      if (!usersObj || typeof usersObj !== 'object') {
+        return { leagues: [], count: 0 };
+      }
+      
+      // Get first user (users.0)
+      const firstUser = usersObj['0'] || usersObj[0];
+      if (!firstUser || !firstUser.user || !Array.isArray(firstUser.user)) {
+        return { leagues: [], count: 0 };
+      }
+      
+      // Find games object in user array
+      let gamesObj = null;
+      for (const item of firstUser.user) {
+        if (item.games) {
+          gamesObj = item.games;
+          break;
         }
       }
-    } catch (error) {
-      console.error('[DEBUG] Error extracting leagues:', error);
+      
+      if (!gamesObj || typeof gamesObj !== 'object') {
+        return { leagues: [], count: 0 };
+      }
+      
+      // Get first game (games.0)
+      const firstGame = gamesObj['0'] || gamesObj[0];
+      if (!firstGame || !firstGame.game || !Array.isArray(firstGame.game)) {
+        return { leagues: [], count: 0 };
+      }
+      
+      // Find leagues object in game array
+      let leaguesObj = null;
+      for (const item of firstGame.game) {
+        if (item.leagues) {
+          leaguesObj = item.leagues;
+          break;
+        }
+      }
+      
+      if (!leaguesObj || typeof leaguesObj !== 'object') {
+        return { leagues: [], count: 0 };
+      }
+      
+      // Extract count
+      const leagueCount = leaguesObj.count || 0;
+      
+      // Extract league objects from numeric keys
+      const leagues: any[] = [];
+      for (const key in leaguesObj) {
+        if (key !== 'count' && leaguesObj[key]?.league) {
+          leagues.push(leaguesObj[key].league);
+        }
+      }
+      
+      return {
+        leagues,
+        count: leagueCount || leagues.length,
+      };
+    } catch (error: any) {
+      console.error('❌ Error parsing getUserLeagues response:', error.message);
+      return { leagues: [], count: 0 };
     }
-    
-    console.error('[DEBUG] Extracted leagues count:', count);
-    
-    return {
-      leagues,
-      count,
-    };
   }
 
   /**
    * Get user profile information
    */
   async getUserProfile(): Promise<User> {
-    return this.makeRequest<User>('GET', `/users;use_login=1/profile`);
+    const response = await this.makeRequest<any>('GET', `/users;use_login=1`);
+    
+    // Yahoo API returns deeply nested object structure with numeric keys
+    
+    try {
+      const usersObj = response.users;
+      if (!usersObj || typeof usersObj !== 'object') {
+        throw new Error('No users object in response');
+      }
+      
+      // Get first user (users.0)
+      const firstUser = usersObj['0'] || usersObj[0];
+      if (!firstUser || !firstUser.user || !Array.isArray(firstUser.user)) {
+        throw new Error('No user array in response');
+      }
+      
+      // Merge all user profile data from array
+      let profile: any = {};
+      for (const item of firstUser.user) {
+        if (typeof item === 'object' && !Array.isArray(item)) {
+          profile = { ...profile, ...item };
+        }
+      }
+      
+      return profile as User;
+    } catch (error: any) {
+      console.error('❌ Error parsing getUserProfile response:', error.message);
+      throw error;
+    }
   }
 
   /**
@@ -312,10 +427,53 @@ export class YahooFantasyClient {
    */
   async getUserTeams(): Promise<{ teams: Team[]; count: number }> {
     const response = await this.makeRequest<any>('GET', `/users;use_login=1/teams`);
-    return {
-      teams: response.teams || [],
-      count: response.count || 0,
-    };
+    
+    // Yahoo API returns deeply nested object structure with numeric keys
+    
+    try {
+      const usersObj = response.users;
+      if (!usersObj || typeof usersObj !== 'object') {
+        return { teams: [], count: 0 };
+      }
+      
+      // Get first user (users.0)
+      const firstUser = usersObj['0'] || usersObj[0];
+      if (!firstUser || !firstUser.user || !Array.isArray(firstUser.user)) {
+        return { teams: [], count: 0 };
+      }
+      
+      // Find teams object in user array
+      let teamsObj = null;
+      for (const item of firstUser.user) {
+        if (item.teams) {
+          teamsObj = item.teams;
+          break;
+        }
+      }
+      
+      if (!teamsObj || typeof teamsObj !== 'object') {
+        return { teams: [], count: 0 };
+      }
+      
+      // Extract count
+      const teamCount = teamsObj.count || 0;
+      
+      // Extract team objects from numeric keys
+      const teams: any[] = [];
+      for (const key in teamsObj) {
+        if (key !== 'count' && teamsObj[key]?.team) {
+          teams.push(teamsObj[key].team);
+        }
+      }
+      
+      return {
+        teams,
+        count: teamCount || teams.length,
+      };
+    } catch (error: any) {
+      console.error('❌ Error parsing getUserTeams response:', error.message);
+      return { teams: [], count: 0 };
+    }
   }
 
   /**
@@ -371,9 +529,10 @@ export class YahooFantasyClient {
    */
   async getLeagueStandings(leagueKey: string): Promise<{ standings: Standing[]; count: number }> {
     const response = await this.makeRequest<any>('GET', `/league/${leagueKey}/standings`);
+    const parsed = this.extractLeagueCollection<Standing>(response, 'standings', 'team');
     return {
-      standings: response.standings || [],
-      count: response.count || 0,
+      standings: parsed.items,
+      count: parsed.count,
     };
   }
 
@@ -399,9 +558,10 @@ export class YahooFantasyClient {
   async getLeagueRosters(leagueKey: string): Promise<{ teams: Team[]; count: number }> {
     const endpoint = `/league/${leagueKey}/teams;out=roster`;
     const response = await this.makeRequest<any>('GET', endpoint);
+    const parsed = this.extractLeagueCollection<Team>(response, 'teams', 'team');
     return {
-      teams: response.teams || [],
-      count: response.count || 0,
+      teams: parsed.items,
+      count: parsed.count,
     };
   }
 
@@ -410,9 +570,10 @@ export class YahooFantasyClient {
    */
   async getDraftResults(leagueKey: string): Promise<{ draft_results: any[]; count: number }> {
     const response = await this.makeRequest<any>('GET', `/league/${leagueKey}/draftresults`);
+    const parsed = this.extractLeagueCollection<any>(response, 'draft_results', 'draft_result');
     return {
-      draft_results: response.draft_results || [],
-      count: response.count || 0,
+      draft_results: parsed.items,
+      count: parsed.count,
     };
   }
 
@@ -422,9 +583,10 @@ export class YahooFantasyClient {
   async getDraftTeams(leagueKey: string): Promise<{ teams: Team[]; count: number }> {
     // Include draft results per team via out param
     const response = await this.makeRequest<any>('GET', `/league/${leagueKey}/teams;out=draft_results`);
+    const parsed = this.extractLeagueCollection<Team>(response, 'teams', 'team');
     return {
-      teams: response.teams || [],
-      count: response.count || 0,
+      teams: parsed.items,
+      count: parsed.count,
     };
   }
 
@@ -443,9 +605,10 @@ export class YahooFantasyClient {
     const params = this.buildFilterParams(filters);
     const endpoint = `/league/${leagueKey}/teams${params}`;
     const response = await this.makeRequest<any>('GET', endpoint);
+    const parsed = this.extractLeagueCollection<Team>(response, 'teams', 'team');
     return {
-      teams: response.teams || [],
-      count: response.count || 0,
+      teams: parsed.items,
+      count: parsed.count,
     };
   }
 
@@ -477,9 +640,10 @@ export class YahooFantasyClient {
     const params = this.buildTransactionFilterParams(filters);
     const endpoint = `/league/${leagueKey}/transactions${params}`;
     const response = await this.makeRequest<any>('GET', endpoint);
+    const parsed = this.extractLeagueCollection<Transaction>(response, 'transactions', 'transaction');
     return {
-      transactions: response.transactions || [],
-      count: response.count || 0,
+      transactions: parsed.items,
+      count: parsed.count,
     };
   }
 
@@ -490,9 +654,10 @@ export class YahooFantasyClient {
     const params = this.buildPlayerFilterParams(filters);
     const endpoint = `/league/${leagueKey}/players${params}`;
     const response = await this.makeRequest<any>('GET', endpoint);
+    const parsed = this.extractLeagueCollection<Player>(response, 'players', 'player');
     return {
-      players: response.players || [],
-      count: response.count || 0,
+      players: parsed.items,
+      count: parsed.count,
     };
   }
 
@@ -528,10 +693,22 @@ export class YahooFantasyClient {
     const weekParam = week ? `;week=${week}` : '';
     const endpoint = `/team/${teamKey}/roster${weekParam}`;
     const response = await this.makeRequest<any>('GET', endpoint);
-    return {
-      players: response.roster?.players || [],
-      count: response.roster?.count || 0,
-    };
+    
+    // Team endpoints wrap data in team array: { team: [{ ...data..., roster: { players: {...} } }] }
+    const teamArray = response.team;
+    if (Array.isArray(teamArray)) {
+      for (const item of teamArray) {
+        if (item.roster?.players) {
+          const parsed = this.parseYahooCollection<Player>(item.roster.players, 'player');
+          return {
+            players: parsed.items,
+            count: parsed.count,
+          };
+        }
+      }
+    }
+    
+    return { players: [], count: 0 };
   }
 
   /**
@@ -574,9 +751,10 @@ export class YahooFantasyClient {
     const params = this.buildTransactionFilterParams(filters);
     const endpoint = `/team/${teamKey}/transactions${params}`;
     const response = await this.makeRequest<any>('GET', endpoint);
+    const parsed = this.extractTeamCollection<Transaction>(response, 'transactions', 'transaction');
     return {
-      transactions: response.transactions || [],
-      count: response.count || 0,
+      transactions: parsed.items,
+      count: parsed.count,
     };
   }
 
@@ -628,9 +806,10 @@ export class YahooFantasyClient {
     const params = this.buildPlayerFilterParams(filters);
     const endpoint = `/games;game_keys=${gameKey}/players${params}`;
     const response = await this.makeRequest<any>('GET', endpoint);
+    const parsed = this.parseYahooCollection<Player>(response.players, 'player');
     return {
-      players: response.players || [],
-      count: response.count || 0,
+      players: parsed.items,
+      count: parsed.count,
     };
   }
 
@@ -645,9 +824,10 @@ export class YahooFantasyClient {
     const params = this.buildPlayerFilterParams(filters);
     const endpoint = `/league/${leagueKey}/players;position=${position}${params}`;
     const response = await this.makeRequest<any>('GET', endpoint);
+    const parsed = this.extractLeagueCollection<Player>(response, 'players', 'player');
     return {
-      players: response.players || [],
-      count: response.count || 0,
+      players: parsed.items,
+      count: parsed.count,
     };
   }
 
@@ -686,9 +866,10 @@ export class YahooFantasyClient {
     const positionParam = position ? `;position=${position}` : '';
     const endpoint = `/league/${leagueKey}/players${positionParam};status=${status};count=${count};start=${start}`;
     const response = await this.makeRequest<any>('GET', endpoint);
+    const parsed = this.extractLeagueCollection<Player>(response, 'players', 'player');
     return {
-      players: response.players || [],
-      count: response.count || 0,
+      players: parsed.items,
+      count: parsed.count,
     };
   }
 
@@ -731,9 +912,10 @@ export class YahooFantasyClient {
   async getWaiverClaims(teamKey: string): Promise<{ transactions: Transaction[]; count: number }> {
     const endpoint = `/team/${teamKey}/transactions;types=waiver`;
     const response = await this.makeRequest<any>('GET', endpoint);
+    const parsed = this.extractTeamCollection<Transaction>(response, 'transactions', 'transaction');
     return {
-      transactions: response.transactions || [],
-      count: response.count || 0,
+      transactions: parsed.items,
+      count: parsed.count,
     };
   }
 
@@ -901,6 +1083,76 @@ export class YahooFantasyClient {
     const xmlData = this.buildEditTeamRosterXML(teamKey, playerChanges);
     const response = await this.makeRequest<any>('POST', `/team/${teamKey}/roster`, xmlData);
     return response.roster;
+  }
+
+  /**
+   * Parse Yahoo API collection format (objects with numeric keys)
+   * Yahoo returns collections as: { "0": {item: ...}, "1": {item: ...}, count: N }
+   */
+  private parseYahooCollection<T>(
+    collectionObj: any,
+    itemKey: string
+  ): { items: T[]; count: number } {
+    if (!collectionObj || typeof collectionObj !== 'object') {
+      return { items: [], count: 0 };
+    }
+
+    const count = collectionObj.count || 0;
+    const items: T[] = [];
+
+    for (const key in collectionObj) {
+      if (key !== 'count' && collectionObj[key]?.[itemKey]) {
+        const itemData = collectionObj[key][itemKey];
+        // Yahoo sometimes wraps items in single-element arrays
+        if (Array.isArray(itemData) && itemData.length > 0) {
+          items.push(itemData[0]);
+        } else if (typeof itemData === 'object') {
+          items.push(itemData);
+        }
+      }
+    }
+
+    return { items, count: count || items.length };
+  }
+
+  /**
+   * Extract collection from league-wrapped response
+   * League endpoints wrap data in league array: { league: [{ ...data..., collection: {...} }] }
+   */
+  private extractLeagueCollection<T>(
+    response: any,
+    collectionName: string,
+    itemKey: string
+  ): { items: T[]; count: number } {
+    const leagueArray = response.league;
+    if (Array.isArray(leagueArray)) {
+      for (const item of leagueArray) {
+        if (item[collectionName]) {
+          return this.parseYahooCollection<T>(item[collectionName], itemKey);
+        }
+      }
+    }
+    return { items: [], count: 0 };
+  }
+
+  /**
+   * Extract collection from team-wrapped response
+   * Team endpoints wrap data in team array: { team: [{ ...data..., collection: {...} }] }
+   */
+  private extractTeamCollection<T>(
+    response: any,
+    collectionName: string,
+    itemKey: string
+  ): { items: T[]; count: number } {
+    const teamArray = response.team;
+    if (Array.isArray(teamArray)) {
+      for (const item of teamArray) {
+        if (item[collectionName]) {
+          return this.parseYahooCollection<T>(item[collectionName], itemKey);
+        }
+      }
+    }
+    return { items: [], count: 0 };
   }
 
   /**
