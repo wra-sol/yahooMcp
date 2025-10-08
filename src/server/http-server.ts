@@ -190,12 +190,34 @@ OAUTH_CALLBACK_URL=${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.
               <li><code>POST /mcp/message</code> - MCP message endpoint</li>
             </ul>
             
+            <h2>Usage Options</h2>
+            
+            <h3>Option 1: Direct HTTP (Recommended for Simple Use)</h3>
+            <p>Send JSON-RPC requests directly without session management:</p>
+            <pre><code>POST ${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp/message
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list",
+  "params": {}
+}</code></pre>
+            <p>✅ No session ID required - responses come back in HTTP body immediately</p>
+            
+            <h3>Option 2: Server-Sent Events (SSE)</h3>
+            <p>For real-time streaming responses (optional):</p>
+            <ol>
+              <li>Connect to <code>${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp</code> to get session ID</li>
+              <li>Use session ID with POST requests for bidirectional communication</li>
+            </ol>
+            
             <h2>n8n Integration</h2>
             <p>To use this with n8n MCP Client:</p>
             <ol>
               <li>Add an MCP Client node in your n8n workflow</li>
-              <li>Set Connection Type to <strong>Server-Sent Events (SSE)</strong></li>
-              <li>Set Server URL to <code>${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp</code></li>
+              <li>Set Connection Type to <strong>Server-Sent Events (SSE)</strong> or <strong>HTTP</strong></li>
+              <li>Set Server URL to <code>${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp</code> (SSE) or <code>${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp/message</code> (HTTP)</li>
               <li>Use the available operations (List Tools, Execute Tool, etc.)</li>
             </ol>
           </div>
@@ -411,6 +433,7 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
   /**
    * Handle MCP SSE endpoint for Server-Sent Events
    * Standard MCP SSE transport - keeps connection open for responses
+   * Note: SSE connection is OPTIONAL. Clients can use /mcp/message directly without establishing SSE.
    */
   private async handleMcpSSE(req: Request): Promise<Response> {
     if (!this.mcpServer) {
@@ -430,10 +453,11 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       });
     }
 
-    // Generate unique session ID
+    // Generate unique session ID (optional - only needed for SSE responses)
     const sessionId = crypto.randomUUID();
     const isAuthenticated = !!this.credentials.accessToken;
     console.error(`[SSE] New connection: ${sessionId} (authenticated: ${isAuthenticated})`);
+    console.error(`[SSE] Session ID is optional - clients can POST to /mcp/message without it`);
 
     // Create SSE stream - standard MCP format
     const stream = new ReadableStream({
@@ -493,6 +517,10 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
   /**
    * Handle MCP message POST endpoint
    * This handles JSON-RPC requests from MCP clients like n8n
+   * 
+   * Session ID is OPTIONAL:
+   * - With session ID: Response sent via both SSE stream AND HTTP body
+   * - Without session ID: Response sent via HTTP body only (standard request/response)
    */
   private async handleMcpMessage(req: Request): Promise<Response> {
     if (!this.mcpServer) {
@@ -534,7 +562,8 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       }
       
       message = await req.json();
-      console.error(`[MCP] Received message: ${message.method} (id: ${message.id})`);
+      const logPrefix = sessionId ? `[MCP:${sessionId.slice(0, 8)}]` : '[MCP:no-session]';
+      console.error(`${logPrefix} Received message: ${message.method} (id: ${message.id})`);
 
       // Allow clients to provide sessionId within the JSON payload
       if (!sessionId && message?.params?.sessionId) {
@@ -544,16 +573,14 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       // Handle the JSON-RPC request
       // Authentication is checked by individual tools when they need to make Yahoo API calls
       const result = await this.mcpServer.handleJsonRpcRequest(message);
-      console.error(`[MCP] Sending response for id: ${message.id}`);
+      console.error(`${logPrefix} Sending response for id: ${message.id}`);
 
+      // If session ID provided, also broadcast via SSE (optional)
       if (sessionId) {
         this.sendSseMessage(sessionId, result);
-      } else {
-        console.error('[MCP] No session id provided; skipping SSE broadcast');
       }
       
-      // Standard MCP SSE: Always return response in HTTP body
-      // SSE stream is only for server-initiated notifications
+      // Always return response in HTTP body (works with or without session)
       return new Response(JSON.stringify(result), {
         headers: { 
           'Content-Type': 'application/json',
@@ -574,11 +601,12 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
         }
       };
 
+      // If session ID provided, also broadcast error via SSE (optional)
       if (sessionId) {
         this.sendSseMessage(sessionId, errorResponse);
       }
       
-      // Standard MCP SSE: Always return errors in HTTP body
+      // Always return errors in HTTP body (works with or without session)
       return new Response(JSON.stringify(errorResponse), {
         status: 500,
         headers: { 

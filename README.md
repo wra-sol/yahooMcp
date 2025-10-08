@@ -13,12 +13,58 @@ A comprehensive Model Context Protocol (MCP) server providing full access to the
 - **Full TypeScript Support**: Comprehensive type definitions for all endpoints
 - **MCP Protocol Compliant**: Standard implementation for seamless AI assistant integration
 - **Multiple Transport Modes**: stdio (local) and HTTP/SSE (remote) support
+- **Session-Free Operation**: Use with or without session IDs - your choice! ✨
 - **n8n Integration**: Works with n8n MCP Client for workflow automation
 - **Multi-Sport Support**: NFL, MLB, NBA, and NHL fantasy leagues
 - **Transaction Management**: Add/drop players, trades, waivers, and FAAB bidding
 - **Commissioner Tools**: League settings, roster management, transaction processing
 - **Real-time Data**: Live scores, standings, matchups, and player statistics
 - **Advanced Features**: Draft results, player ownership, trade voting, and more
+
+## 🎯 Quick Start Modes
+
+### Mode 1: Direct HTTP (No Session Required) ✨ NEW!
+
+The simplest way to use the MCP server - just POST requests, no session management:
+
+```bash
+# Start the server
+bun run dev
+
+# Send a request (no session ID needed!)
+curl -X POST http://localhost:3000/mcp/message \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+Perfect for:
+- Testing and prototyping
+- Simple integrations
+- Stateless applications
+- Any HTTP client
+
+[See full Direct HTTP guide →](SSE_USAGE.md)
+
+### Mode 2: Server-Sent Events (SSE)
+
+For real-time streaming and bidirectional communication:
+
+```bash
+# Connect to SSE endpoint
+GET http://localhost:3000/mcp
+
+# Use session ID for streaming responses
+POST http://localhost:3000/mcp/message
+X-Session-Id: <session-id>
+```
+
+Perfect for:
+- Real-time applications
+- n8n workflows
+- Long-running connections
+- Server-initiated notifications
+
+[See full SSE guide →](SSE_USAGE.md)
 
 ## 📋 Table of Contents
 
