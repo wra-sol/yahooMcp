@@ -1329,10 +1329,323 @@ export class FantasyTools {
             },
             description: 'Array of player position changes',
           },
+          date: {
+            type: 'string',
+            description: 'Target date (YYYY-MM-DD) for daily leagues; defaults to tomorrow if omitted',
+          },
+          week: {
+            type: 'string',
+            description: 'Target week number for weekly leagues',
+          },
+          coverageType: {
+            type: 'string',
+            enum: ['date', 'week'],
+            description: 'Optional override for coverage type; inferred when omitted',
+          },
         },
         required: ['leagueKey', 'teamKey', 'playerChanges'],
         additionalProperties: false,
       },
+    };
+  }
+
+  /**
+   * Utility: Check if a player is available in the league
+   */
+  async isPlayerAvailable(leagueKey: string, playerKey: string): Promise<boolean> {
+    try {
+      const ownership = await this.client.getPlayerOwnership(leagueKey, playerKey);
+      // Player is available if ownership indicates no team owns them
+      return !ownership?.ownership?.owner_team_key;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Utility: Get simplified roster summary for quick analysis
+   */
+  async getRosterSummary(teamKey: string): Promise<{
+    totalPlayers: number;
+    byPosition: Record<string, number>;
+    injured: number;
+    bench: number;
+    starters: number;
+  }> {
+    const roster = await this.client.getTeamRoster(teamKey);
+    const players = this.parseTeamPlayers({ team: [roster] });
+    
+    const byPosition: Record<string, number> = {};
+    let injured = 0;
+    let bench = 0;
+    let starters = 0;
+
+    for (const player of players) {
+      const pos = player.lineup_position || player.position;
+      if (pos) {
+        byPosition[pos] = (byPosition[pos] || 0) + 1;
+      }
+      
+      if (player.injury_status && player.injury_status !== 'H') {
+        injured++;
+      }
+      
+      if (player.lineup_position === 'BN') {
+        bench++;
+      } else if (player.lineup_position && player.lineup_position !== 'IR' && player.lineup_position !== 'IL') {
+        starters++;
+      }
+    }
+
+    return {
+      totalPlayers: players.length,
+      byPosition,
+      injured,
+      bench,
+      starters,
+    };
+  }
+
+  /**
+   * Utility: Check if team can add players (has roster space and weekly adds remaining)
+   */
+  async canAddPlayers(leagueKey: string, teamKey: string): Promise<{
+    canAdd: boolean;
+    reason?: string;
+    rosterSpace: boolean;
+    weeklyAddsRemaining: number | null;
+  }> {
+    const [settings, team] = await Promise.all([
+      this.client.getLeagueSettings(leagueKey),
+      this.client.getTeam(teamKey, { players: true }),
+    ]);
+
+    const settingsData = Array.isArray((settings as any)?.league) ? (settings as any).league : [];
+    const settingsSection = settingsData.find((entry: any) => entry?.settings)?.settings ?? [];
+    const primarySettings = Array.isArray(settingsSection) ? settingsSection[0] ?? {} : {};
+    
+    const maxRosterSize = primarySettings.roster_positions
+      ? this.parseRosterPositionsSummary(primarySettings.roster_positions).total
+      : null;
+    
+    const teamArray = Array.isArray((team as any)?.team) ? (team as any).team : [];
+    const teamMetaArray = Array.isArray(teamArray[0]) ? teamArray[0] : [];
+    const teamMeta = this.flattenYahooObjectArray(teamMetaArray);
+    const currentPlayers = this.parseTeamPlayers(team as any).length;
+
+    const rosterSpace = maxRosterSize ? currentPlayers < maxRosterSize : true;
+    
+    const weeklyAddsLimit = primarySettings.max_weekly_adds ? Number(primarySettings.max_weekly_adds) : null;
+    const weeklyAddsUsed = teamMeta.roster_adds?.value ? Number(teamMeta.roster_adds.value) : 0;
+    const weeklyAddsRemaining = weeklyAddsLimit !== null ? Math.max(weeklyAddsLimit - weeklyAddsUsed, 0) : null;
+
+    let canAdd = true;
+    let reason: string | undefined;
+
+    if (!rosterSpace) {
+      canAdd = false;
+      reason = 'No roster space available. Must drop a player first.';
+    } else if (weeklyAddsRemaining !== null && weeklyAddsRemaining <= 0) {
+      canAdd = false;
+      reason = 'Weekly add limit reached.';
+    }
+
+    return {
+      canAdd,
+      reason,
+      rosterSpace,
+      weeklyAddsRemaining,
+    };
+  }
+
+  /**
+   * Utility: Get FAAB budget remaining for a team
+   */
+  async getFAABRemaining(leagueKey: string, teamKey: string): Promise<{
+    usesFAAB: boolean;
+    budgetTotal: number | null;
+    budgetRemaining: number | null;
+  }> {
+    const settings = await this.client.getLeagueSettings(leagueKey);
+    const team = await this.client.getTeam(teamKey);
+
+    const settingsData = Array.isArray((settings as any)?.league) ? (settings as any).league : [];
+    const settingsSection = settingsData.find((entry: any) => entry?.settings)?.settings ?? [];
+    const primarySettings = Array.isArray(settingsSection) ? settingsSection[0] ?? {} : {};
+
+    const usesFAAB = primarySettings.uses_faab === '1';
+    const budgetTotal = usesFAAB ? Number(primarySettings.faab_budget ?? 0) : null;
+    
+    // Get team's remaining FAAB from team metadata
+    const teamArray = Array.isArray((team as any)?.team) ? (team as any).team : [];
+    const teamMetaArray = Array.isArray(teamArray[0]) ? teamArray[0] : [];
+    const teamMeta = this.flattenYahooObjectArray(teamMetaArray);
+    const budgetRemaining = usesFAAB && teamMeta.faab_balance ? Number(teamMeta.faab_balance) : budgetTotal;
+
+    return {
+      usesFAAB,
+      budgetTotal,
+      budgetRemaining,
+    };
+  }
+
+  /**
+   * Utility: Compare two players side-by-side
+   */
+  async comparePlayers(
+    playerKey1: string,
+    playerKey2: string,
+    statType: 'season' | 'lastweek' | 'lastmonth' | 'date' | 'week' = 'season'
+  ): Promise<{
+    player1: any;
+    player2: any;
+    comparison: Record<string, { player1: any; player2: any; winner: string | null }>;
+  }> {
+    const [player1Data, player2Data, stats1, stats2] = await Promise.all([
+      this.client.getPlayer(playerKey1),
+      this.client.getPlayer(playerKey2),
+      this.client.getPlayerStats(playerKey1, statType).catch(() => null),
+      this.client.getPlayerStats(playerKey2, statType).catch(() => null),
+    ]);
+
+    const comparison: Record<string, { player1: any; player2: any; winner: string | null }> = {};
+    
+    // Basic comparison of available stats
+    if (stats1 && stats2) {
+      // Extract stats from Yahoo response structure
+      const extractStats = (statsResponse: any) => {
+        const playerArray = Array.isArray(statsResponse?.player) ? statsResponse.player : [];
+        const statsEntry = playerArray.find((entry: any) => entry?.player_stats);
+        return statsEntry?.player_stats?.stats || [];
+      };
+
+      const p1Stats = extractStats(stats1);
+      const p2Stats = extractStats(stats2);
+      
+      // Compare each stat
+      for (const stat of p1Stats) {
+        const statId = stat?.stat?.stat_id;
+        const statName = stat?.stat?.name || stat?.stat?.display_name;
+        const p1Value = Number(stat?.stat?.value || 0);
+        
+        const p2Stat = p2Stats.find((s: any) => s?.stat?.stat_id === statId);
+        const p2Value = p2Stat ? Number(p2Stat.stat?.value || 0) : 0;
+        
+        if (statName) {
+          comparison[statName] = {
+            player1: p1Value,
+            player2: p2Value,
+            winner: p1Value > p2Value ? 'player1' : p2Value > p1Value ? 'player2' : null,
+          };
+        }
+      }
+    }
+
+    return {
+      player1: player1Data,
+      player2: player2Data,
+      comparison,
+    };
+  }
+
+  /**
+   * Utility: Get droppable players from a roster (players on bench with lowest value)
+   */
+  async getDropCandidates(
+    teamKey: string,
+    limit: number = 5
+  ): Promise<Array<{ playerKey: string; name: string; reason: string }>> {
+    const roster = await this.client.getTeamRoster(teamKey);
+    const players = this.parseTeamPlayers({ team: [roster] });
+    
+    const candidates: Array<{ playerKey: string; name: string; reason: string }> = [];
+
+    // Identify bench players
+    for (const player of players) {
+      if (player.lineup_position === 'BN') {
+        candidates.push({
+          playerKey: player.player_key,
+          name: player.name,
+          reason: 'On bench',
+        });
+      }
+    }
+
+    // Identify injured players on IR
+    for (const player of players) {
+      if (player.lineup_position === 'IR' || player.lineup_position === 'IL') {
+        candidates.push({
+          playerKey: player.player_key,
+          name: player.name,
+          reason: 'On injured reserve',
+        });
+      }
+    }
+
+    return candidates.slice(0, limit);
+  }
+
+  /**
+   * Utility: Validate a transaction before submitting
+   */
+  async validateTransaction(
+    leagueKey: string,
+    teamKey: string,
+    action: 'add' | 'drop' | 'add_drop',
+    playerKeys: { add?: string; drop?: string }
+  ): Promise<{
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+  }> {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    try {
+      const canAddResult = await this.canAddPlayers(leagueKey, teamKey);
+
+      if (action === 'add' || action === 'add_drop') {
+        if (!playerKeys.add) {
+          errors.push('Player to add is required');
+        } else {
+          // Check if player is available
+          const available = await this.isPlayerAvailable(leagueKey, playerKeys.add);
+          if (!available) {
+            errors.push('Player is not available');
+          }
+        }
+
+        if (action === 'add' && !canAddResult.rosterSpace) {
+          errors.push('No roster space available. Must drop a player.');
+        }
+
+        if (!canAddResult.canAdd && canAddResult.reason) {
+          warnings.push(canAddResult.reason);
+        }
+      }
+
+      if (action === 'drop' || action === 'add_drop') {
+        if (!playerKeys.drop) {
+          errors.push('Player to drop is required');
+        } else {
+          // Check if team owns the player
+          const roster = await this.client.getTeamRoster(teamKey);
+          const players = this.parseTeamPlayers({ team: [roster] });
+          const ownsPlayer = players.some(p => p.player_key === playerKeys.drop);
+          
+          if (!ownsPlayer) {
+            errors.push('Team does not own the player to drop');
+          }
+        }
+      }
+    } catch (error: any) {
+      errors.push(`Validation error: ${error.message}`);
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings,
     };
   }
 
@@ -1550,15 +1863,43 @@ export class FantasyTools {
           return await this.client.editTeamRoster(
             args.leagueKey,
             args.teamKey,
-            args.playerChanges
+            args.playerChanges,
+            {
+              date: args.date,
+              week: args.week,
+              coverageType: args.coverageType,
+            }
           );
 
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
     } catch (error: any) {
-      throw new Error(`Tool execution failed: ${error.message}`);
+      // Provide more context about the tool execution failure
+      const context = {
+        tool: name,
+        args: args,
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      };
+      
+      // Log for debugging but don't expose sensitive data in error message
+      console.error('Tool execution failed:', context);
+      
+      // Re-throw with contextual information
+      throw new Error(
+        `Tool '${name}' execution failed: ${error.message}\n` +
+        `Check that all required parameters are provided and valid.`
+      );
     }
+  }
+
+  /**
+   * Get client instance for advanced usage
+   * WARNING: Direct client access bypasses tool validation
+   */
+  getClient(): YahooFantasyClient {
+    return this.client;
   }
 
   private async buildTeamContext(

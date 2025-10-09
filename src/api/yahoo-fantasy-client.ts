@@ -1230,9 +1230,14 @@ export class YahooFantasyClient {
     playerChanges: Array<{
       playerKey: string;
       position: string;
-    }>
+    }>,
+    options?: {
+      date?: string;
+      week?: string | number;
+      coverageType?: 'date' | 'week';
+    }
   ): Promise<any> {
-    const xmlData = this.buildEditTeamRosterXML(teamKey, playerChanges);
+    const xmlData = this.buildEditTeamRosterXML(teamKey, playerChanges, options);
     const response = await this.makeRequest<any>('POST', `/team/${teamKey}/roster`, xmlData);
     return response.roster;
   }
@@ -1727,13 +1732,42 @@ ${noteXML}  </transaction>
 </fantasy_content>`;
   }
 
+  private getDefaultRosterDate(): string {
+    const now = new Date();
+    now.setUTCDate(now.getUTCDate() + 1);
+    return now.toISOString().split('T')[0];
+  }
+
   /**
    * Build XML for editing team roster (commissioner only)
    */
   private buildEditTeamRosterXML(
     teamKey: string,
-    playerChanges: Array<{ playerKey: string; position: string }>
+    playerChanges: Array<{ playerKey: string; position: string }>,
+    options?: {
+      date?: string;
+      week?: string | number;
+      coverageType?: 'date' | 'week';
+    }
   ): string {
+    const coverageType = options?.coverageType ?? (options?.week !== undefined ? 'week' : 'date');
+
+    let coverageValue: string;
+    if (coverageType === 'week') {
+      if (options?.week === undefined) {
+        throw new Error('Week must be provided when coverage type is "week"');
+      }
+      coverageValue = String(options.week);
+    } else {
+      const targetDate = options?.date ?? this.getDefaultRosterDate();
+      coverageValue = targetDate;
+    }
+
+    const coverageValueXML =
+      coverageType === 'week'
+        ? `    <week>${coverageValue}</week>`
+        : `    <date>${coverageValue}</date>`;
+
     const playersXML = playerChanges.map(change => `      <player>
         <player_key>${change.playerKey}</player_key>
         <position>${change.position}</position>
@@ -1742,8 +1776,8 @@ ${noteXML}  </transaction>
     return `<?xml version='1.0'?>
 <fantasy_content>
   <roster>
-    <coverage_type>date</coverage_type>
-    <date>${new Date().toISOString().split('T')[0]}</date>
+    <coverage_type>${coverageType}</coverage_type>
+${coverageValueXML}
     <is_commissioner_action>1</is_commissioner_action>
     <players>
 ${playersXML}
