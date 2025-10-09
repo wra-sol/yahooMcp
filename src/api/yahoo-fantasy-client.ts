@@ -129,7 +129,7 @@ export class YahooFantasyClient {
    * Make authenticated request to Yahoo Fantasy API
    */
   private async makeRequest<T>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     endpoint: string,
     data?: any,
     retryCount = 0
@@ -159,14 +159,14 @@ export class YahooFantasyClient {
       method,
       headers: {
         ...authHeader,
-        // Yahoo API requires application/xml for POST requests with XML data
+        // Yahoo API requires application/xml for POST/PUT requests with XML data
         // But we can still request JSON response via ?format=json
         'Content-Type': isXmlData ? 'application/xml' : 'application/json',
         'Accept': 'application/json',
       },
     };
 
-    if (data && method === 'POST') {
+    if (data && (method === 'POST' || method === 'PUT')) {
       fetchOptions.body = data;
     }
 
@@ -1238,7 +1238,8 @@ export class YahooFantasyClient {
     }
   ): Promise<any> {
     const xmlData = this.buildEditTeamRosterXML(teamKey, playerChanges, options);
-    const response = await this.makeRequest<any>('POST', `/team/${teamKey}/roster`, xmlData);
+    // Yahoo API requires PUT method for roster position changes, not POST
+    const response = await this.makeRequest<any>('PUT', `/team/${teamKey}/roster`, xmlData);
     return response.roster;
   }
 
