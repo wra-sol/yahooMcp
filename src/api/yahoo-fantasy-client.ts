@@ -1221,8 +1221,8 @@ export class YahooFantasyClient {
   }
 
   /**
-   * Edit team roster positions (commissioner only)
-   * Directly set player positions on a team's roster
+   * Edit team roster positions
+   * Set player positions on a team's roster (lineup changes)
    */
   async editTeamRoster(
     leagueKey: string,
@@ -1235,6 +1235,7 @@ export class YahooFantasyClient {
       date?: string;
       week?: string | number;
       coverageType?: 'date' | 'week';
+      isCommissionerAction?: boolean;
     }
   ): Promise<any> {
     const xmlData = this.buildEditTeamRosterXML(teamKey, playerChanges, options);
@@ -1740,7 +1741,7 @@ ${noteXML}  </transaction>
   }
 
   /**
-   * Build XML for editing team roster (commissioner only)
+   * Build XML for editing team roster
    */
   private buildEditTeamRosterXML(
     teamKey: string,
@@ -1749,6 +1750,7 @@ ${noteXML}  </transaction>
       date?: string;
       week?: string | number;
       coverageType?: 'date' | 'week';
+      isCommissionerAction?: boolean;
     }
   ): string {
     const coverageType = options?.coverageType ?? (options?.week !== undefined ? 'week' : 'date');
@@ -1769,6 +1771,11 @@ ${noteXML}  </transaction>
         ? `    <week>${coverageValue}</week>`
         : `    <date>${coverageValue}</date>`;
 
+    // Only include is_commissioner_action if explicitly set to true
+    const commissionerActionXML = options?.isCommissionerAction === true
+      ? `    <is_commissioner_action>1</is_commissioner_action>\n`
+      : '';
+
     const playersXML = playerChanges.map(change => `      <player>
         <player_key>${change.playerKey}</player_key>
         <position>${change.position}</position>
@@ -1779,8 +1786,7 @@ ${noteXML}  </transaction>
   <roster>
     <coverage_type>${coverageType}</coverage_type>
 ${coverageValueXML}
-    <is_commissioner_action>1</is_commissioner_action>
-    <players>
+${commissionerActionXML}    <players>
 ${playersXML}
     </players>
   </roster>

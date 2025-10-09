@@ -130,6 +130,7 @@ export class FantasyTools {
       this.manageRosterTool(),
       this.processTransactionTool(),
       this.editTeamRosterTool(),
+      this.httpRequestTool(),
     ];
   }
 
@@ -1349,6 +1350,65 @@ export class FantasyTools {
     };
   }
 
+  private httpRequestTool(): Tool {
+    return {
+      name: 'http_request',
+      description: `Fetch fantasy sports news, analysis, and player information from expert websites. 
+      
+Recommended fantasy sports outlets by sport:
+• NFL: FantasyPros (fantasypros.com/nfl), RotoWire (rotowire.com/football), NBC Sports Edge (nbcsports.com/fantasy/football), PFF Fantasy (pff.com/fantasy)
+• NBA: RotoWire (rotowire.com/basketball), Basketball Monster (basketballmonster.com), Hashtag Basketball (hashtagbasketball.com)
+• MLB: RotoWire (rotowire.com/baseball), FanGraphs (fangraphs.com/blogs/category/fantasy), Baseball Prospectus (baseballprospectus.com/fantasy)
+• NHL: RotoWire (rotowire.com/hockey), DobberHockey (dobberhockey.com), Daily Faceoff (dailyfaceoff.com)
+• Soccer: RotoWire (rotowire.com/soccer), Fantasy Football Scout (fantasyfootballscout.co.uk), Fantasy Premier League (fantasy.premierleague.com)
+
+Use this tool to gather injury updates, start/sit recommendations, waiver wire targets, trade analysis, and expert rankings.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description: 'Full URL to fetch (e.g., "https://www.fantasypros.com/nfl/players/player.php")',
+          },
+          method: {
+            type: 'string',
+            enum: ['GET', 'POST'],
+            default: 'GET',
+            description: 'HTTP method to use',
+          },
+          headers: {
+            type: 'object',
+            description: 'Optional HTTP headers as key-value pairs',
+            additionalProperties: { type: 'string' },
+          },
+          params: {
+            type: 'object',
+            description: 'Optional URL query parameters as key-value pairs',
+            additionalProperties: { type: 'string' },
+          },
+          body: {
+            type: 'string',
+            description: 'Optional request body for POST requests (JSON string)',
+          },
+          timeout: {
+            type: 'number',
+            description: 'Request timeout in milliseconds (default: 10000)',
+            default: 10000,
+            minimum: 1000,
+            maximum: 30000,
+          },
+          followRedirects: {
+            type: 'boolean',
+            description: 'Whether to follow HTTP redirects (default: true)',
+            default: true,
+          },
+        },
+        required: ['url'],
+        additionalProperties: false,
+      },
+    };
+  }
+
   /**
    * Utility: Check if a player is available in the league
    */
@@ -1871,6 +1931,9 @@ export class FantasyTools {
             }
           );
 
+        case 'http_request':
+          return await this.executeHttpRequest(args);
+
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
@@ -1891,6 +1954,89 @@ export class FantasyTools {
         `Tool '${name}' execution failed: ${error.message}\n` +
         `Check that all required parameters are provided and valid.`
       );
+    }
+  }
+
+  /**
+   * Execute HTTP request to external fantasy sports websites
+   */
+  private async executeHttpRequest(args: any): Promise<any> {
+    const {
+      url,
+      method = 'GET',
+      headers = {},
+      params = {},
+      body,
+      timeout = 10000,
+      followRedirects = true,
+    } = args;
+
+    // Validate URL
+    try {
+      new URL(url);
+    } catch (error) {
+      throw new Error(`Invalid URL: ${url}`);
+    }
+
+    // Build full URL with query params
+    const urlObj = new URL(url);
+    Object.entries(params).forEach(([key, value]) => {
+      urlObj.searchParams.append(key, String(value));
+    });
+
+    // Set default headers
+    const requestHeaders: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (compatible; YahooFantasyMCP/1.0)',
+      ...headers,
+    };
+
+    // Build fetch options
+    const fetchOptions: RequestInit = {
+      method,
+      headers: requestHeaders,
+      redirect: followRedirects ? 'follow' : 'manual',
+      signal: AbortSignal.timeout(timeout),
+    };
+
+    // Add body for POST requests
+    if (method === 'POST' && body) {
+      fetchOptions.body = body;
+      if (!requestHeaders['Content-Type']) {
+        requestHeaders['Content-Type'] = 'application/json';
+      }
+    }
+
+    try {
+      const response = await fetch(urlObj.toString(), fetchOptions);
+      
+      // Get response data
+      const contentType = response.headers.get('content-type') || '';
+      let data: any;
+      
+      if (contentType.includes('application/json')) {
+        data = await response.json();
+      } else if (contentType.includes('text/html') || contentType.includes('text/plain')) {
+        data = await response.text();
+      } else {
+        // For other content types, try to get text
+        data = await response.text();
+      }
+
+      return {
+        success: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
+        data,
+        url: response.url,
+        redirected: response.redirected,
+      };
+    } catch (error: any) {
+      // Handle timeout and network errors
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+        throw new Error(`Request timeout after ${timeout}ms`);
+      }
+      throw new Error(`HTTP request failed: ${error.message}`);
     }
   }
 
