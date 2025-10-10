@@ -59,7 +59,9 @@ export class YahooFantasyMcpServer {
         // Execute the tool
         const result = await this.fantasyTools.executeTool(name, args);
         
-        return {
+        console.error(`[MCP] Tool '${name}' completed, result size: ${JSON.stringify(result).length} bytes`);
+        
+        const response = {
           content: [
             {
               type: 'text',
@@ -67,6 +69,9 @@ export class YahooFantasyMcpServer {
             },
           ],
         };
+        
+        console.error(`[MCP] Returning response for tool '${name}'`);
+        return response;
       } catch (error: any) {
         return {
           content: [
