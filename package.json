@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.ts",
-    "start": "bun run src/index.ts",
+    "start": "./yahoo-mcp",
     "build": "bun build src/index.ts --compile --minify --outfile yahoo-mcp",
     "build:bundle": "bun build src/index.ts --outdir ./dist --target bun --minify --sourcemap=external",
     "build:optimized": "bun build src/index.ts --compile --minify --target=bun --outfile yahoo-mcp && strip yahoo-mcp 2>/dev/null || true",
