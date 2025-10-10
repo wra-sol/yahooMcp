@@ -1722,6 +1722,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
    * Execute a tool by name with parameters
    */
   async executeTool(name: string, args: any): Promise<any> {
+    console.error(`[executeTool] Called with name=${name}, args=${JSON.stringify(args).substring(0, 200)}`);
     try {
       switch (name) {
         case 'get_user_games':
@@ -2167,6 +2168,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     teamKey: string,
     options?: { week?: string }
   ): Promise<any> {
+    console.error(`[buildTeamContext] Called with leagueKey=${leagueKey}, teamKey=${teamKey}, week=${options?.week || 'current'}`);
     const week = options?.week;
 
     const [leagueSettingsRaw, teamWithPlayers, scoreboardResult, teamMatchupsResult] = await Promise.all([
@@ -2219,6 +2221,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
 
     const dataComplete = Boolean(players.length && statCategories.length && scoreboardResult.matchups.length);
 
+    console.error(`[buildTeamContext] Completed successfully. players=${players.length}, dataComplete=${dataComplete}`);
     return {
       fetch_type: 'TEAM_CONTEXT',
       status: 'SUCCESS',
