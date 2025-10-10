@@ -12,7 +12,8 @@ import { OAuthCredentials } from './types/index.js';
  * 
  * Features:
  * - HTTP server for OAuth authentication at http://localhost:3000
- * - MCP server for AI assistant integration via stdio
+ * - MCP server with official SSE transport (MCP v2024-11-05)
+ * - 40+ Yahoo Fantasy Sports tools for leagues, teams, players, and transactions
  * 
  * Setup:
  * 1. Register your application at https://developer.yahoo.com/
@@ -23,6 +24,11 @@ import { OAuthCredentials } from './types/index.js';
  *    - OAUTH_CALLBACK_URL (defaults to http://localhost:3000/oauth/callback)
  * 4. Run: bun start
  * 5. Visit http://localhost:3000 to authenticate
+ * 
+ * MCP Integration:
+ * - SSE Endpoint: GET /mcp
+ * - Messages: POST /mcp/messages?sessionId=...
+ * - Compatible with: n8n, Claude Desktop, Cursor, and other MCP clients
  */
 
 async function main() {
@@ -83,9 +89,10 @@ async function main() {
         console.error('   MCP available via: stdio');
       } else {
         // Use SSE transport via HTTP (for remote clients like n8n)
-        console.error('   MCP available via: HTTP/SSE');
-        console.error(`   MCP Endpoint: http://localhost:${port}/mcp`);
-        console.error(`   Message Endpoint: http://localhost:${port}/mcp/message`);
+        console.error('   MCP available via: Official SSE Transport');
+        console.error(`   SSE Endpoint: http://localhost:${port}/mcp`);
+        console.error(`   Messages: http://localhost:${port}/mcp/messages`);
+        console.error('   Protocol: MCP v2024-11-05');
       }
     } else {
       console.error('');

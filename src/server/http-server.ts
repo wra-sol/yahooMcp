@@ -14,9 +14,7 @@ export class HttpOAuthServer {
   private port: number;
   private tokenFilePath: string;
   private mcpServer?: YahooFantasyMcpServer;
-  private sseClients: Map<string, ReadableStreamDefaultController> = new Map();
-  private sessionIdMap: Map<string, string> = new Map(); // Map request correlation IDs to session IDs
-  private officialSseTransports: Map<string, SSEServerTransport> = new Map(); // Official MCP SDK transports
+  private sseTransports: Map<string, SSEServerTransport> = new Map(); // Official MCP SDK transports
 
   constructor(credentials: OAuthCredentials, port: number = 3000) {
     this.credentials = credentials;
@@ -69,24 +67,14 @@ export class HttpOAuthServer {
       return this.handleHealthCheck();
     }
 
-    // Route: MCP SSE endpoint (custom implementation - backward compatible)
+    // Route: MCP SSE endpoint (official MCP SDK transport)
     if (pathname === '/mcp' && req.method === 'GET') {
-      return this.handleMcpSSE(req);
+      return this.handleMcpSseEndpoint(req);
     }
 
-    // Route: MCP POST endpoint (for sending messages)
-    if (pathname === '/mcp/message' && req.method === 'POST') {
+    // Route: MCP message endpoint (official MCP SDK transport)
+    if (pathname === '/mcp/messages' && req.method === 'POST') {
       return this.handleMcpMessage(req);
-    }
-
-    // Route: Official MCP SDK SSE endpoint (standard compliant)
-    if (pathname === '/mcp/sse' && req.method === 'GET') {
-      return this.handleOfficialSseEndpoint(req);
-    }
-
-    // Route: Official MCP SDK SSE message endpoint
-    if (pathname === '/mcp/sse/messages' && req.method === 'POST') {
-      return this.handleOfficialSseMessage(req);
     }
 
     // 404 Not Found
@@ -198,66 +186,73 @@ OAUTH_CALLBACK_URL=${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.
               <li><code>GET /oauth/start</code> - Start OAuth flow</li>
               <li><code>GET /oauth/callback</code> - OAuth callback (automatic)</li>
               <li><code>GET /health</code> - Health check</li>
-              <li><strong>Custom Implementation (Backward Compatible):</strong>
+              <li><strong>MCP Protocol (Official SDK Transport):</strong>
                 <ul>
-                  <li><code>GET /mcp</code> - Custom SSE endpoint (optional session)</li>
-                  <li><code>POST /mcp/message</code> - Direct HTTP endpoint (no session required)</li>
-                </ul>
-              </li>
-              <li><strong>Official MCP SDK (Standards Compliant):</strong>
-                <ul>
-                  <li><code>GET /mcp/sse</code> - Official SSE transport endpoint</li>
-                  <li><code>POST /mcp/sse/messages</code> - Official SSE message endpoint</li>
+                  <li><code>GET /mcp</code> - SSE transport endpoint</li>
+                  <li><code>POST /mcp/messages?sessionId=...</code> - Message endpoint</li>
                 </ul>
               </li>
             </ul>
             
-            <h2>Usage Options</h2>
+            <h2>MCP Protocol Usage</h2>
             
-            <h3>Option 1: Direct HTTP (Simplest - No Session Required)</h3>
-            <p>Send JSON-RPC requests directly without session management:</p>
-            <pre><code>POST ${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp/message
-Content-Type: application/json
-
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/list",
-  "params": {}
-}</code></pre>
-            <p>✅ No session ID required - responses come back in HTTP body immediately</p>
+            <p>This server implements the official Model Context Protocol using Server-Sent Events (SSE) transport:</p>
             
-            <h3>Option 2: Custom SSE (Backward Compatible)</h3>
-            <p>Our custom implementation with optional session support:</p>
+            <h3>Connection Flow</h3>
             <ol>
-              <li>Connect to <code>${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp</code> to get session ID (optional)</li>
-              <li>Use session ID with POST requests for bidirectional communication</li>
-            </ol>
-
-            <h3>Option 3: Official MCP SDK SSE (Standards Compliant)</h3>
-            <p>Use the official MCP SDK transport (recommended for MCP clients):</p>
-            <ol>
-              <li>Connect to <code>${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp/sse</code> to establish SSE connection</li>
-              <li>Get session ID from response headers</li>
-              <li>POST messages to <code>/mcp/sse/messages?sessionId=YOUR_SESSION_ID</code></li>
+              <li>Establish SSE connection: <code>GET ${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp</code></li>
+              <li>Receive session ID from response headers or SSE endpoint event</li>
+              <li>Send JSON-RPC messages: <code>POST /mcp/messages?sessionId=YOUR_SESSION_ID</code></li>
               <li>Receive responses via SSE stream</li>
             </ol>
-            <p>✅ Fully compliant with MCP protocol specification</p>
             
-            <h2>n8n Integration</h2>
-            <p>To use this with n8n MCP Client:</p>
+            <h3>Example</h3>
+            <pre><code>// 1. Connect to SSE endpoint
+const eventSource = new EventSource('${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp');
+
+// 2. Listen for session ID
+eventSource.addEventListener('endpoint', (e) => {
+  const sessionId = e.data; // Get session ID
+});
+
+// 3. Send messages
+fetch('/mcp/messages?sessionId=abc-123', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/list',
+    params: {}
+  })
+});
+
+// 4. Receive responses via SSE
+eventSource.addEventListener('message', (e) => {
+  const response = JSON.parse(e.data);
+  console.log(response);
+});</code></pre>
+            
+            <p>✅ Fully compliant with MCP protocol specification (v2024-11-05)</p>
+            
+            <h2>MCP Client Integration</h2>
+            <p>To use this server with MCP-compatible clients (n8n, Claude Desktop, etc.):</p>
             <ol>
-              <li>Add an MCP Client node in your n8n workflow</li>
-              <li>Choose your connection method:
-                <ul>
-                  <li><strong>Direct HTTP (Simplest):</strong> <code>${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp/message</code></li>
-                  <li><strong>Custom SSE:</strong> <code>${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp</code></li>
-                  <li><strong>Official MCP SSE:</strong> <code>${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp/sse</code></li>
-                </ul>
-              </li>
-              <li>Use the available operations (List Tools, Execute Tool, etc.)</li>
+              <li>Add an MCP Client connection in your application</li>
+              <li>Set connection type to <strong>Server-Sent Events (SSE)</strong></li>
+              <li>Set server URL to: <code>${process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${this.port}`}/mcp</code></li>
+              <li>The client will automatically handle session management and JSON-RPC messaging</li>
             </ol>
-            <p><strong>Recommendation:</strong> Use Direct HTTP for simplicity or Official MCP SSE for full standard compliance.</p>
+            
+            <h3>Available Tools</h3>
+            <p>Once connected, you can use 40+ Yahoo Fantasy Sports tools including:</p>
+            <ul>
+              <li>League information and standings</li>
+              <li>Team rosters and matchups</li>
+              <li>Player stats and availability</li>
+              <li>Transaction management (add/drop/trade)</li>
+              <li>Free agent searches</li>
+            </ul>
           </div>
         </body>
       </html>
@@ -460,7 +455,12 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       timestamp: new Date().toISOString(),
       server: 'Bun native HTTP',
       mcpEnabled: !!this.mcpServer,
-      mcpEndpoint: this.mcpServer ? '/mcp' : null,
+      mcpProtocol: '2024-11-05',
+      endpoints: {
+        sse: '/mcp',
+        messages: '/mcp/messages',
+      },
+      transport: 'Official MCP SDK (SSEServerTransport)',
     };
 
     return new Response(JSON.stringify(data, null, 2), {
@@ -469,198 +469,10 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
   }
 
   /**
-   * Handle MCP SSE endpoint for Server-Sent Events
-   * Standard MCP SSE transport - keeps connection open for responses
-   * Note: SSE connection is OPTIONAL. Clients can use /mcp/message directly without establishing SSE.
-   */
-  private async handleMcpSSE(req: Request): Promise<Response> {
-    if (!this.mcpServer) {
-      // Return error as plain JSON, not SSE
-      return new Response(JSON.stringify({
-        jsonrpc: '2.0',
-        error: {
-          code: -32603,
-          message: 'MCP server not initialized. Please authenticate first.',
-        },
-      }), {
-        status: 503,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
-    }
-
-    // Generate unique session ID (optional - only needed for SSE responses)
-    const sessionId = crypto.randomUUID();
-    const isAuthenticated = !!this.credentials.accessToken;
-    console.error(`[SSE] New connection: ${sessionId} (authenticated: ${isAuthenticated})`);
-    console.error(`[SSE] Session ID is optional - clients can POST to /mcp/message without it`);
-
-    // Create SSE stream - standard MCP format
-    const stream = new ReadableStream({
-      start: async (controller) => {
-        try {
-          // Store controller for this session
-          this.sseClients.set(sessionId, controller);
-          
-          const encoder = new TextEncoder();
-          
-          // MCP SSE protocol: advertise message endpoint for JSON-RPC POSTs
-          controller.enqueue(encoder.encode(`event: endpoint\ndata: /mcp/message\n\n`));
-          
-          // Keep connection alive with periodic pings (comments, not data events)
-          const pingInterval = setInterval(() => {
-            try {
-              controller.enqueue(encoder.encode(': keepalive\n\n'));
-            } catch (e) {
-              clearInterval(pingInterval);
-              this.sseClients.delete(sessionId);
-            }
-          }, 15000); // Send every 15 seconds to keep connection alive
-
-          // Handle connection close
-          req.signal.addEventListener('abort', () => {
-            console.error(`[SSE] Connection closed: ${sessionId}`);
-            clearInterval(pingInterval);
-            this.sseClients.delete(sessionId);
-            try {
-              controller.close();
-            } catch (e) {
-              // Already closed
-            }
-          });
-        } catch (error: any) {
-          console.error('[SSE] Error:', error);
-          this.sseClients.delete(sessionId);
-          controller.error(error);
-        }
-      },
-    });
-
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, X-Session-Id',
-        'X-Accel-Buffering': 'no', // Disable buffering for SSE
-        'X-Session-Id': sessionId,
-      },
-    });
-  }
-
-  /**
-   * Handle MCP message POST endpoint
-   * This handles JSON-RPC requests from MCP clients like n8n
-   * 
-   * Session ID is OPTIONAL:
-   * - With session ID: Response sent via both SSE stream AND HTTP body
-   * - Without session ID: Response sent via HTTP body only (standard request/response)
-   */
-  private async handleMcpMessage(req: Request): Promise<Response> {
-    if (!this.mcpServer) {
-      return new Response(JSON.stringify({ 
-        jsonrpc: '2.0',
-        id: null,
-        error: {
-          code: -32603,
-          message: 'MCP server not initialized'
-        }
-      }), {
-        status: 503,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
-    }
-
-    let sessionId = req.headers.get('X-Session-Id') || undefined;
-    let message: any;
-
-    try {
-      // Attempt to extract session id from query parameters if header is unavailable
-      try {
-        const requestUrl = new URL(req.url);
-        sessionId = sessionId
-          || requestUrl.searchParams.get('sessionId')
-          || requestUrl.searchParams.get('SessionId')
-          || undefined;
-      } catch (parseError) {
-        console.error('[MCP] Failed to parse request URL for sessionId:', parseError);
-      }
-
-      // Check if request has a body
-      const contentLength = req.headers.get('content-length');
-      if (!contentLength || contentLength === '0') {
-        throw new Error('Empty request body. Expected JSON-RPC message.');
-      }
-      
-      message = await req.json();
-      const logPrefix = sessionId ? `[MCP:${sessionId.slice(0, 8)}]` : '[MCP:no-session]';
-      console.error(`${logPrefix} Received message: ${message.method} (id: ${message.id})`);
-
-      // Allow clients to provide sessionId within the JSON payload
-      if (!sessionId && message?.params?.sessionId) {
-        sessionId = message.params.sessionId;
-      }
-      
-      // Handle the JSON-RPC request
-      // Authentication is checked by individual tools when they need to make Yahoo API calls
-      const result = await this.mcpServer.handleJsonRpcRequest(message);
-      console.error(`${logPrefix} Sending response for id: ${message.id}`);
-
-      // If session ID provided, also broadcast via SSE (optional)
-      if (sessionId) {
-        this.sendSseMessage(sessionId, result);
-      }
-      
-      // Always return response in HTTP body (works with or without session)
-      return new Response(JSON.stringify(result), {
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, X-Session-Id',
-        },
-      });
-    } catch (error: any) {
-      console.error('[MCP] Message error:', error);
-      const responseId = message?.id ?? null;
-      const errorResponse = { 
-        jsonrpc: '2.0',
-        id: responseId,
-        error: {
-          code: -32603,
-          message: error.message || 'Internal server error'
-        }
-      };
-
-      // If session ID provided, also broadcast error via SSE (optional)
-      if (sessionId) {
-        this.sendSseMessage(sessionId, errorResponse);
-      }
-      
-      // Always return errors in HTTP body (works with or without session)
-      return new Response(JSON.stringify(errorResponse), {
-        status: 500,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
-    }
-  }
-
-  /**
-   * Handle official MCP SDK SSE endpoint
+   * Handle MCP SSE endpoint
    * Uses the official SSEServerTransport from @modelcontextprotocol/sdk
-   * This is the MCP-standard compliant implementation
    */
-  private async handleOfficialSseEndpoint(req: Request): Promise<Response> {
+  private async handleMcpSseEndpoint(req: Request): Promise<Response> {
     if (!this.mcpServer) {
       return new Response(JSON.stringify({
         jsonrpc: '2.0',
@@ -677,19 +489,19 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       });
     }
 
-    console.error('[Official SSE] New connection established');
+    console.error('[MCP SSE] New connection established');
 
     // Create a Response object that we'll use for SSE
     const stream = new ReadableStream({
       start: async (controller) => {
         try {
           // Create official SSE transport
-          const transport = new SSEServerTransport('/mcp/sse/messages', {
+          const transport = new SSEServerTransport('/mcp/messages', {
             write: (chunk: Uint8Array) => {
               try {
                 controller.enqueue(chunk);
               } catch (e) {
-                console.error('[Official SSE] Error writing chunk:', e);
+                console.error('[MCP SSE] Error writing chunk:', e);
               }
             },
             close: () => {
@@ -703,20 +515,20 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
 
           // Store transport with session ID from transport
           const sessionId = transport.sessionId;
-          this.officialSseTransports.set(sessionId, transport);
-          console.error(`[Official SSE] Session created: ${sessionId}`);
+          this.sseTransports.set(sessionId, transport);
+          console.error(`[MCP SSE] Session created: ${sessionId}`);
 
           // Connect MCP server to transport
           await this.mcpServer!.getServer().connect(transport);
 
           // Handle connection close
           req.signal.addEventListener('abort', () => {
-            console.error(`[Official SSE] Connection closed: ${sessionId}`);
-            this.officialSseTransports.delete(sessionId);
+            console.error(`[MCP SSE] Connection closed: ${sessionId}`);
+            this.sseTransports.delete(sessionId);
             transport.close();
           });
         } catch (error: any) {
-          console.error('[Official SSE] Error:', error);
+          console.error('[MCP SSE] Error:', error);
           controller.error(error);
         }
       },
@@ -736,10 +548,10 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
   }
 
   /**
-   * Handle official MCP SDK SSE message endpoint
+   * Handle MCP message endpoint
    * Processes JSON-RPC messages using the official SSEServerTransport
    */
-  private async handleOfficialSseMessage(req: Request): Promise<Response> {
+  private async handleMcpMessage(req: Request): Promise<Response> {
     if (!this.mcpServer) {
       return new Response(JSON.stringify({ 
         jsonrpc: '2.0',
@@ -779,7 +591,7 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       }
 
       // Get the transport for this session
-      const transport = this.officialSseTransports.get(sessionId);
+      const transport = this.sseTransports.get(sessionId);
       if (!transport) {
         return new Response(JSON.stringify({
           jsonrpc: '2.0',
@@ -798,7 +610,7 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
 
       // Parse the message
       const message = await req.json();
-      console.error(`[Official SSE:${sessionId.slice(0, 8)}] Received: ${message.method}`);
+      console.error(`[MCP:${sessionId.slice(0, 8)}] Received: ${message.method}`);
 
       // Process the message through the official transport
       await transport.handlePostMessage(req as any, {} as any, message);
@@ -811,7 +623,7 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
         },
       });
     } catch (error: any) {
-      console.error('[Official SSE] Message error:', error);
+      console.error('[MCP] Message error:', error);
       return new Response(JSON.stringify({
         jsonrpc: '2.0',
         error: {
@@ -825,27 +637,6 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
           'Access-Control-Allow-Origin': '*',
         },
       });
-    }
-  }
-
-  /**
-   * Send a message through an SSE stream
-   */
-  private sendSseMessage(sessionId: string, message: any): void {
-    const controller = this.sseClients.get(sessionId);
-    if (!controller) {
-      console.error(`[SSE] No controller found for session: ${sessionId}`);
-      return;
-    }
-
-    try {
-      const encoder = new TextEncoder();
-      const data = JSON.stringify(message);
-      // Send as SSE message event
-      controller.enqueue(encoder.encode(`event: message\ndata: ${data}\n\n`));
-    } catch (error: any) {
-      console.error(`[SSE] Error sending message to session ${sessionId}:`, error.message);
-      this.sseClients.delete(sessionId);
     }
   }
 
