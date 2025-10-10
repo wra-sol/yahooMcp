@@ -1,7 +1,13 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { YahooFantasyClient } from '../api/yahoo-fantasy-client.js';
-import { OAuthCredentials } from '../types/index.js';
+import { 
+  OAuthCredentials,
+  YahooFantasyError,
+  RosterLockedError,
+  AuthenticationError,
+  InsufficientPermissionsError,
+} from '../types/index.js';
 
 // Validation schemas
 const OAuthCredentialsSchema = z.object({
@@ -1938,7 +1944,61 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
           throw new Error(`Unknown tool: ${name}`);
       }
     } catch (error: any) {
-      // Provide more context about the tool execution failure
+      // Handle specific error types with better context
+      if (error instanceof RosterLockedError) {
+        // Provide structured error information for roster locks
+        const errorInfo = error.toJSON();
+        console.error('Roster lock error:', errorInfo);
+        
+        throw new Error(
+          `Tool '${name}' failed: ${error.message}\n\n` +
+          `Error Type: ROSTER_LOCKED\n` +
+          `Team: ${error.teamKey || 'Unknown'}\n` +
+          `Date: ${error.date || 'Unknown'}\n\n` +
+          `Recovery: The roster is locked for this date. You can:\n` +
+          `  - Try a future date when the roster will be unlocked\n` +
+          `  - Wait until the current game/lock period ends\n` +
+          `  - Check the league settings for roster lock times\n\n` +
+          `Structured error data:\n${JSON.stringify(errorInfo, null, 2)}`
+        );
+      }
+      
+      if (error instanceof AuthenticationError) {
+        console.error('Authentication error:', error.message);
+        throw new Error(
+          `Tool '${name}' failed: Authentication required\n\n` +
+          `${error.message}\n\n` +
+          `Recovery: Please re-authenticate using the OAuth flow to get a new access token.`
+        );
+      }
+      
+      if (error instanceof InsufficientPermissionsError) {
+        console.error('Permission error:', error.message);
+        throw new Error(
+          `Tool '${name}' failed: Insufficient permissions\n\n` +
+          `${error.message}\n\n` +
+          `${error.requiredPermission ? `Required: ${error.requiredPermission}\n\n` : ''}` +
+          `Recovery: This action requires additional permissions. ` +
+          `You may need to be a league commissioner or have specific role permissions.`
+        );
+      }
+      
+      if (error instanceof YahooFantasyError) {
+        console.error('Yahoo Fantasy API error:', {
+          code: error.code,
+          message: error.message,
+          statusCode: error.statusCode,
+        });
+        throw new Error(
+          `Tool '${name}' failed: Yahoo API Error\n\n` +
+          `Error Code: ${error.code}\n` +
+          `Status: ${error.statusCode}\n` +
+          `Message: ${error.message}\n\n` +
+          `Check that all parameters are valid and the requested resource exists.`
+        );
+      }
+      
+      // Generic error handling
       const context = {
         tool: name,
         args: args,

@@ -17,6 +17,10 @@ import {
   TransactionFilters,
   OAuthCredentials,
   LeagueSettings,
+  YahooFantasyError,
+  RosterLockedError,
+  AuthenticationError,
+  InsufficientPermissionsError,
 } from '../types/index.js';
 
 export class YahooFantasyClient {
@@ -126,6 +130,62 @@ export class YahooFantasyClient {
   }
 
   /**
+   * Parse Yahoo API error response and throw appropriate error type
+   */
+  private parseAndThrowError(
+    statusCode: number,
+    errorData: any,
+    endpoint: string
+  ): never {
+    let yahooError: YahooApiError | undefined;
+    
+    // Parse the error data structure
+    if (errorData && typeof errorData === 'object') {
+      if ('error' in errorData) {
+        yahooError = errorData.error as YahooApiError;
+      }
+    }
+
+    const errorDescription = yahooError?.description || 'Unknown error';
+    
+    // Detect roster lock errors
+    if (statusCode === 400 && errorDescription.toLowerCase().includes('cannot make changes to your roster')) {
+      // Extract team key and date from endpoint if possible
+      const teamKeyMatch = endpoint.match(/team\/([^\/]+)/);
+      const teamKey = teamKeyMatch ? teamKeyMatch[1] : undefined;
+      
+      // Try to parse date from the error context or endpoint
+      const dateMatch = endpoint.match(/date=([^&]+)/);
+      const date = dateMatch ? dateMatch[1] : undefined;
+      
+      throw new RosterLockedError(
+        errorDescription,
+        date,
+        teamKey,
+        yahooError
+      );
+    }
+    
+    // Detect authentication errors
+    if (statusCode === 401) {
+      throw new AuthenticationError(errorDescription, statusCode);
+    }
+    
+    // Detect permission errors
+    if (statusCode === 403) {
+      throw new InsufficientPermissionsError(errorDescription, undefined, yahooError);
+    }
+    
+    // Generic Yahoo Fantasy error
+    throw new YahooFantasyError(
+      errorDescription,
+      `HTTP_${statusCode}`,
+      statusCode,
+      yahooError
+    );
+  }
+
+  /**
    * Make authenticated request to Yahoo Fantasy API
    */
   private async makeRequest<T>(
@@ -135,7 +195,7 @@ export class YahooFantasyClient {
     retryCount = 0
   ): Promise<T> {
     if (!this.oauthClient.hasValidAccessToken()) {
-      throw new Error('No valid access token available. Please authenticate first.');
+      throw new AuthenticationError('No valid access token available. Please authenticate first.');
     }
 
     // Proactively refresh token if it's close to expiration
@@ -176,18 +236,15 @@ export class YahooFantasyClient {
       if (!response.ok) {
         // Try to get error details from response
         const contentType = response.headers.get('content-type');
-        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        let errorData: any = null;
         
         try {
           const errorText = await response.text();
           if (contentType?.includes('application/json')) {
-            const errorData = JSON.parse(errorText);
-            errorMessage += ` - ${JSON.stringify(errorData)}`;
-          } else {
-            errorMessage += ` - ${errorText.substring(0, 200)}`;
+            errorData = JSON.parse(errorText);
           }
         } catch (e) {
-          // Ignore parsing errors for error messages
+          // Ignore parsing errors
         }
         
         if (response.status === 401 && retryCount < 1) {
@@ -199,12 +256,14 @@ export class YahooFantasyClient {
             // Retry the request with new token
             return this.makeRequest<T>(method, endpoint, data, retryCount + 1);
           } else {
-            throw new Error('Authentication failed. No session handle available for token refresh. Please re-authenticate.');
+            throw new AuthenticationError('Authentication failed. No session handle available for token refresh. Please re-authenticate.');
           }
         } else if (response.status === 401) {
-          throw new Error('Authentication failed after token refresh. Please re-authenticate.');
+          throw new AuthenticationError('Authentication failed after token refresh. Please re-authenticate.');
         }
-        throw new Error(errorMessage);
+        
+        // Parse and throw specific error type
+        this.parseAndThrowError(response.status, errorData, endpoint);
       }
 
       // Parse JSON response

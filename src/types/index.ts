@@ -351,6 +351,8 @@ export interface UsersCollection {
 export interface YahooApiError {
   description: string;
   detail?: string;
+  'xml:lang'?: string;
+  'yahoo:uri'?: string;
 }
 
 export interface YahooApiResponse<T = any> {
@@ -361,6 +363,67 @@ export interface YahooApiResponse<T = any> {
     encoding: string;
     version: string;
   };
+}
+
+// Custom Error Classes
+export class YahooFantasyError extends Error {
+  public readonly code: string;
+  public readonly yahooError?: YahooApiError;
+  public readonly statusCode?: number;
+
+  constructor(message: string, code: string, statusCode?: number, yahooError?: YahooApiError) {
+    super(message);
+    this.name = 'YahooFantasyError';
+    this.code = code;
+    this.statusCode = statusCode;
+    this.yahooError = yahooError;
+    Object.setPrototypeOf(this, YahooFantasyError.prototype);
+  }
+}
+
+export class RosterLockedError extends YahooFantasyError {
+  public readonly date?: string;
+  public readonly teamKey?: string;
+
+  constructor(message: string, date?: string, teamKey?: string, yahooError?: YahooApiError) {
+    super(message, 'ROSTER_LOCKED', 400, yahooError);
+    this.name = 'RosterLockedError';
+    this.date = date;
+    this.teamKey = teamKey;
+    Object.setPrototypeOf(this, RosterLockedError.prototype);
+  }
+
+  toJSON() {
+    return {
+      status: 'ERROR',
+      error_type: this.code,
+      message: this.message,
+      date: this.date,
+      team_key: this.teamKey,
+      recovery_suggestion: 'Roster is locked for this date. Try a future date or wait until the lock period ends.',
+      timestamp: new Date().toISOString(),
+      yahoo_error: this.yahooError
+    };
+  }
+}
+
+export class AuthenticationError extends YahooFantasyError {
+  constructor(message: string, statusCode?: number) {
+    super(message, 'AUTHENTICATION_FAILED', statusCode);
+    this.name = 'AuthenticationError';
+    Object.setPrototypeOf(this, AuthenticationError.prototype);
+  }
+}
+
+export class InsufficientPermissionsError extends YahooFantasyError {
+  public readonly requiredPermission?: string;
+
+  constructor(message: string, requiredPermission?: string, yahooError?: YahooApiError) {
+    super(message, 'INSUFFICIENT_PERMISSIONS', 403, yahooError);
+    this.name = 'InsufficientPermissionsError';
+    this.requiredPermission = requiredPermission;
+    Object.setPrototypeOf(this, InsufficientPermissionsError.prototype);
+  }
 }
 
 // OAuth Types
