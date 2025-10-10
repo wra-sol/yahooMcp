@@ -5,6 +5,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { YahooFantasyMcpServer } from './mcp-server.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { IncomingMessage, ServerResponse } from 'http';
 
 export class HttpOAuthServer {
   private server?: ReturnType<typeof Bun.serve>;
@@ -491,27 +492,68 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
 
     console.error('[MCP SSE] New connection established');
 
-    // Create a Response object that we'll use for SSE
+    // Create a mock ServerResponse that works with SSEServerTransport
     const stream = new ReadableStream({
       start: async (controller) => {
         try {
-          // Create official SSE transport
-          const transport = new SSEServerTransport('/mcp/messages', {
-            write: (chunk: Uint8Array) => {
+          // Create a mock ServerResponse object for SSEServerTransport
+          let isHeadersSent = false;
+          let isFinished = false;
+          
+          const mockResponse: any = {
+            get headersSent() { return isHeadersSent; },
+            get finished() { return isFinished; },
+            writeHead: (statusCode: number, headers: any) => {
+              isHeadersSent = true;
+              // Headers are already set on the Response object
+              return mockResponse;
+            },
+            write: (chunk: any, encoding?: any, callback?: any) => {
               try {
-                controller.enqueue(chunk);
+                const data = typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk;
+                controller.enqueue(data);
+                if (typeof encoding === 'function') {
+                  encoding(); // encoding is actually the callback
+                } else if (callback) {
+                  callback();
+                }
+                return true;
               } catch (e) {
                 console.error('[MCP SSE] Error writing chunk:', e);
+                return false;
               }
             },
-            close: () => {
+            end: (chunk?: any, encoding?: any, callback?: any) => {
+              isFinished = true;
               try {
+                if (chunk) {
+                  const data = typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk;
+                  controller.enqueue(data);
+                }
                 controller.close();
+                if (typeof chunk === 'function') {
+                  chunk(); // chunk is actually the callback
+                } else if (typeof encoding === 'function') {
+                  encoding();
+                } else if (callback) {
+                  callback();
+                }
               } catch (e) {
                 // Already closed
               }
-            }
-          } as any);
+              return mockResponse;
+            },
+            setHeader: () => mockResponse,
+            getHeader: () => undefined,
+            removeHeader: () => mockResponse,
+            on: () => mockResponse,
+            once: () => mockResponse,
+            emit: () => true,
+            // Add other required ServerResponse properties
+          } as unknown as ServerResponse;
+
+          // Create official SSE transport with mock response
+          const transport = new SSEServerTransport('/mcp/messages', mockResponse);
 
           // Store transport with session ID from transport
           const sessionId = transport.sessionId;
@@ -612,8 +654,27 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       const message = await req.json();
       console.error(`[MCP:${sessionId.slice(0, 8)}] Received: ${message.method}`);
 
+      // Create mock IncomingMessage object
+      const mockReq = {
+        headers: Object.fromEntries(req.headers.entries()),
+        url: url.pathname + url.search,
+        method: req.method,
+      } as any as IncomingMessage;
+
+      // Create mock ServerResponse object
+      const mockRes = {
+        headersSent: false,
+        finished: false,
+        writeHead: () => mockRes,
+        write: () => true,
+        end: () => mockRes,
+        setHeader: () => mockRes,
+        getHeader: () => undefined,
+        removeHeader: () => mockRes,
+      } as any as ServerResponse;
+
       // Process the message through the official transport
-      await transport.handlePostMessage(req as any, {} as any, message);
+      await transport.handlePostMessage(mockReq, mockRes, message);
 
       // Return 202 Accepted (standard for SSE message handling)
       return new Response(null, {
