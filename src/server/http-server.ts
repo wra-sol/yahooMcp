@@ -505,12 +505,15 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
             get finished() { return isFinished; },
             writeHead: (statusCode: number, headers: any) => {
               isHeadersSent = true;
+              console.error(`[MCP SSE] writeHead called: ${statusCode}`);
               // Headers are already set on the Response object
               return mockResponse;
             },
             write: (chunk: any, encoding?: any, callback?: any) => {
               try {
                 const data = typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk;
+                const chunkStr = typeof chunk === 'string' ? chunk : new TextDecoder().decode(data);
+                console.error(`[MCP SSE] Writing chunk (${data.length} bytes): ${chunkStr.substring(0, 100)}...`);
                 controller.enqueue(data);
                 if (typeof encoding === 'function') {
                   encoding(); // encoding is actually the callback
