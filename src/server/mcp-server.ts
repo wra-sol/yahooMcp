@@ -1,4 +1,4 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
@@ -9,7 +9,7 @@ import { FantasyTools } from '../tools/fantasy-tools.js';
 import { OAuthCredentials } from '../types/index.js';
 
 export class YahooFantasyMcpServer {
-  private server: Server;
+  private server: McpServer;
   private fantasyTools: FantasyTools;
   private credentials: OAuthCredentials;
   private tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>;
@@ -20,10 +20,12 @@ export class YahooFantasyMcpServer {
     this.tokenSaveCallback = tokenSaveCallback;
     this.fantasyTools = new FantasyTools(credentials, tokenSaveCallback);
     
-    this.server = new Server(
+    this.server = new McpServer(
       {
         name: 'yahoo-fantasy-mcp',
         version: '1.0.0',
+      },
+      {
         capabilities: {
           tools: {},
         },
@@ -99,7 +101,7 @@ export class YahooFantasyMcpServer {
   /**
    * Get server instance (for HTTP integration)
    */
-  getServer(): Server {
+  getServer(): McpServer {
     return this.server;
   }
 

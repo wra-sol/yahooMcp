@@ -19,8 +19,11 @@ import {
   LeagueSettings,
   YahooFantasyError,
   RosterLockedError,
+  RosterConstraintError,
   AuthenticationError,
   InsufficientPermissionsError,
+  NetworkError,
+  RateLimitError,
 } from '../types/index.js';
 
 export class YahooFantasyClient {
@@ -29,6 +32,7 @@ export class YahooFantasyClient {
   private tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>;
   private isRefreshing = false;
   private refreshPromise?: Promise<void>;
+  private requestTimeout = 30000; // 30 seconds default timeout
 
   constructor(credentials: OAuthCredentials, tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>) {
     this.oauthClient = new YahooOAuthClient(credentials);
@@ -147,9 +151,10 @@ export class YahooFantasyClient {
     }
 
     const errorDescription = yahooError?.description || 'Unknown error';
+    const lowerDescription = errorDescription.toLowerCase();
     
     // Detect roster lock errors
-    if (statusCode === 400 && errorDescription.toLowerCase().includes('cannot make changes to your roster')) {
+    if (statusCode === 400 && lowerDescription.includes('cannot make changes to your roster')) {
       // Extract team key and date from endpoint if possible
       const teamKeyMatch = endpoint.match(/team\/([^\/]+)/);
       const teamKey = teamKeyMatch ? teamKeyMatch[1] : undefined;
@@ -166,6 +171,36 @@ export class YahooFantasyClient {
       );
     }
     
+    // Detect roster constraint errors (position filled, invalid position, etc.)
+    if (statusCode === 400) {
+      let constraintType: string | undefined;
+      
+      if (lowerDescription.includes('position has already been filled') || 
+          lowerDescription.includes('that position has already been filled')) {
+        constraintType = 'position_filled';
+      } else if (lowerDescription.includes('not eligible') || 
+                 lowerDescription.includes('invalid position')) {
+        constraintType = 'invalid_position';
+      } else if (lowerDescription.includes('roster limit') || 
+                 lowerDescription.includes('too many players')) {
+        constraintType = 'roster_limit';
+      }
+      
+      if (constraintType) {
+        // Try to extract position and player key from endpoint
+        const teamKeyMatch = endpoint.match(/team\/([^\/]+)/);
+        const teamKey = teamKeyMatch ? teamKeyMatch[1] : undefined;
+        
+        throw new RosterConstraintError(
+          errorDescription,
+          constraintType,
+          undefined, // position - would need to parse from request data
+          undefined, // playerKey - would need to parse from request data
+          yahooError
+        );
+      }
+    }
+    
     // Detect authentication errors
     if (statusCode === 401) {
       throw new AuthenticationError(errorDescription, statusCode);
@@ -174,6 +209,12 @@ export class YahooFantasyClient {
     // Detect permission errors
     if (statusCode === 403) {
       throw new InsufficientPermissionsError(errorDescription, undefined, yahooError);
+    }
+    
+    // Detect rate limiting errors
+    if (statusCode === 429) {
+      // Try to extract retry-after header from the original response if available
+      throw new RateLimitError(errorDescription || 'Rate limit exceeded', undefined, yahooError);
     }
     
     // Generic Yahoo Fantasy error
@@ -230,8 +271,14 @@ export class YahooFantasyClient {
       fetchOptions.body = data;
     }
 
+    // Add timeout to fetch request
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
+    fetchOptions.signal = controller.signal;
+
     try {
       const response = await fetch(url, fetchOptions);
+      clearTimeout(timeoutId);
       
       if (!response.ok) {
         // Try to get error details from response
@@ -260,6 +307,17 @@ export class YahooFantasyClient {
           }
         } else if (response.status === 401) {
           throw new AuthenticationError('Authentication failed after token refresh. Please re-authenticate.');
+        }
+        
+        // Check for rate limiting with Retry-After header
+        if (response.status === 429) {
+          const retryAfter = response.headers.get('retry-after');
+          const retrySeconds = retryAfter ? parseInt(retryAfter, 10) : undefined;
+          throw new RateLimitError(
+            'Rate limit exceeded. Too many requests to Yahoo Fantasy API.',
+            retrySeconds,
+            errorData?.error
+          );
         }
         
         // Parse and throw specific error type
@@ -303,15 +361,32 @@ export class YahooFantasyClient {
         return responseData as T;
       }
       
-      throw new Error('Invalid response structure from Yahoo API');
+      throw new YahooFantasyError('Invalid response structure from Yahoo API', 'INVALID_RESPONSE');
     } catch (error: any) {
-      if (error.message.includes('Authentication failed')) {
+      // Clear timeout if we hit an error
+      clearTimeout(timeoutId);
+      
+      // Re-throw our custom errors
+      if (error instanceof YahooFantasyError) {
         throw error;
       }
-      if (error.message.includes('Expected JSON')) {
-        throw error;
+      
+      // Handle network errors
+      if (error.name === 'AbortError') {
+        throw new NetworkError(`Request timeout after ${this.requestTimeout}ms`, error);
       }
-      throw new Error(`API request failed: ${error.message}`);
+      
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        throw new NetworkError('Network connection failed. Please check your internet connection.', error);
+      }
+      
+      // Handle other fetch errors
+      if (error instanceof TypeError || error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+        throw new NetworkError(`Network error: ${error.message}`, error);
+      }
+      
+      // Generic error fallback
+      throw new YahooFantasyError(`API request failed: ${error.message}`, 'REQUEST_FAILED', undefined);
     }
   }
 

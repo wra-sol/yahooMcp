@@ -5,8 +5,11 @@ import {
   OAuthCredentials,
   YahooFantasyError,
   RosterLockedError,
+  RosterConstraintError,
   AuthenticationError,
   InsufficientPermissionsError,
+  NetworkError,
+  RateLimitError,
 } from '../types/index.js';
 
 // Validation schemas
@@ -1960,6 +1963,57 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
           `  - Wait until the current game/lock period ends\n` +
           `  - Check the league settings for roster lock times\n\n` +
           `Structured error data:\n${JSON.stringify(errorInfo, null, 2)}`
+        );
+      }
+      
+      if (error instanceof RosterConstraintError) {
+        // Provide structured error information for roster constraints
+        const errorInfo = error.toJSON();
+        console.error('Roster constraint error:', errorInfo);
+        
+        throw new Error(
+          `Tool '${name}' failed: ${error.message}\n\n` +
+          `Error Type: ROSTER_CONSTRAINT\n` +
+          `Constraint: ${error.constraintType?.toUpperCase()}\n` +
+          `Position: ${error.position || 'Unknown'}\n` +
+          `Player: ${error.playerKey || 'Unknown'}\n\n` +
+          `Recovery: ${errorInfo.recovery_suggestion}\n\n` +
+          `Common solutions:\n` +
+          `  - For "position_filled": Move the current player out first, then move the new player in\n` +
+          `  - For "invalid_position": Check the player's eligible_positions list\n` +
+          `  - For "roster_limit": Drop a player before adding another\n\n` +
+          `Structured error data:\n${JSON.stringify(errorInfo, null, 2)}`
+        );
+      }
+      
+      if (error instanceof RateLimitError) {
+        const errorInfo = error.toJSON();
+        console.error('Rate limit error:', errorInfo);
+        const waitTime = error.retryAfter || 60;
+        
+        throw new Error(
+          `Tool '${name}' failed: Rate limit exceeded\n\n` +
+          `${error.message}\n\n` +
+          `Wait Time: ${waitTime} seconds\n\n` +
+          `Recovery: Yahoo API rate limit exceeded. You must:\n` +
+          `  - Wait ${waitTime} seconds before retrying\n` +
+          `  - Reduce request frequency\n` +
+          `  - Implement exponential backoff\n` +
+          `  - Cache responses when possible\n\n` +
+          `Structured error data:\n${JSON.stringify(errorInfo, null, 2)}`
+        );
+      }
+      
+      if (error instanceof NetworkError) {
+        console.error('Network error:', error.message);
+        throw new Error(
+          `Tool '${name}' failed: Network error\n\n` +
+          `${error.message}\n\n` +
+          `Recovery: This is a network connectivity issue. You can:\n` +
+          `  - Check your internet connection\n` +
+          `  - Verify the Yahoo API is accessible\n` +
+          `  - Retry the request after a brief delay\n` +
+          `  - Check for firewall or proxy issues`
         );
       }
       

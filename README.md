@@ -14,6 +14,7 @@ A comprehensive Model Context Protocol (MCP) server providing full access to the
 - **MCP Protocol Compliant**: Standard implementation for seamless AI assistant integration
 - **Multiple Transport Modes**: stdio (local) and HTTP/SSE (remote) support
 - **Session-Free Operation**: Use with or without session IDs - your choice! ✨
+- **Intelligent Error Handling**: Specialized error types for roster locks, auth failures, and permissions ✨
 - **n8n Integration**: Works with n8n MCP Client for workflow automation
 - **Multi-Sport Support**: NFL, MLB, NBA, and NHL fantasy leagues
 - **Transaction Management**: Add/drop players, trades, waivers, and FAAB bidding
@@ -720,35 +721,96 @@ Yahoo Fantasy uses specific key formats to identify resources:
 
 ## ⚠️ Error Handling
 
-The server provides comprehensive error handling:
+The server provides **intelligent error handling** with specialized error types and structured error data. ✨
+
+### Specialized Error Types
+
+The server now detects and provides detailed information for common failure scenarios:
+
+#### 🔒 Roster Lock Errors
+When attempting to modify rosters during lock periods (e.g., during active games):
+
+```json
+{
+  "error_type": "ROSTER_LOCKED",
+  "message": "You cannot make changes to your roster for this date.",
+  "date": "2025-10-11",
+  "team_key": "465.l.27830.t.10",
+  "recovery_suggestion": "Try a future date or wait until the lock period ends."
+}
+```
+
+**Recovery:** Retry with a future date or wait for the roster to unlock after games complete.
+
+#### 🔑 Authentication Errors
+When access tokens expire or are invalid:
+
+```json
+{
+  "error_type": "AUTHENTICATION_FAILED",
+  "message": "Authentication failed. Please re-authenticate.",
+  "recovery_suggestion": "Use OAuth flow to get a new access token."
+}
+```
+
+**Recovery:** Re-authenticate using the OAuth flow to obtain fresh tokens.
+
+#### 🚫 Permission Errors
+When attempting actions without required permissions:
+
+```json
+{
+  "error_type": "INSUFFICIENT_PERMISSIONS",
+  "message": "This action requires commissioner privileges.",
+  "recovery_suggestion": "Use a commissioner account or request appropriate permissions."
+}
+```
+
+**Recovery:** Use an account with the necessary permissions (e.g., league commissioner).
+
+### Error Handling Example
 
 ```typescript
 try {
-  const result = await fantasyTools.executeTool('get_league', {
-    leagueKey: '423.l.123456'
+  await fantasyTools.executeTool('edit_team_roster', {
+    teamKey: '465.l.27830.t.10',
+    playerChanges: [{ playerKey: '465.p.6752', position: 'RW' }],
+    date: '2025-10-11'
   });
 } catch (error) {
-  if (error.message.includes('Authentication failed')) {
-    // Token expired - refresh needed
-  } else if (error.message.includes('401')) {
-    // Invalid credentials
-  } else if (error.message.includes('404')) {
-    // Resource not found
-  } else {
-    // Other API error
+  if (error.message.includes('ROSTER_LOCKED')) {
+    // Parse structured error data
+    const errorData = JSON.parse(error.message.match(/Structured error data:\n([\s\S]+)$/)[1]);
+    console.log('Locked date:', errorData.date);
+    // Retry with next day
+    const nextDay = addDays(errorData.date, 1);
+    // Retry...
+  } else if (error.message.includes('AUTHENTICATION_FAILED')) {
+    // Re-authenticate
+    await reAuthenticate();
+  } else if (error.message.includes('INSUFFICIENT_PERMISSIONS')) {
+    // Switch to admin account or notify user
+    console.log('Requires commissioner privileges');
   }
 }
 ```
 
+**📖 See the [Error Handling Guide](ERROR_HANDLING.md) for complete documentation, including:**
+- Detailed error type reference
+- Recovery strategies for each error type
+- Sport-specific roster lock timing
+- Automatic retry examples
+- AI agent integration patterns
+
 ### Common Error Scenarios
 
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `Authentication failed` | Expired token | Refresh access token using session handle |
-| `401 Unauthorized` | Invalid credentials | Re-authenticate with Yahoo |
-| `404 Not Found` | Invalid key/resource | Verify resource keys are correct |
-| `403 Forbidden` | No permission | Check if user has access to league/team |
-| `Rate limit exceeded` | Too many requests | Implement request throttling |
+| Error Type | HTTP Status | Cause | Solution |
+|------------|-------------|-------|----------|
+| `ROSTER_LOCKED` | 400 | Roster changes during lock period | Try future date or wait for unlock |
+| `AUTHENTICATION_FAILED` | 401 | Expired/invalid token | Re-authenticate via OAuth |
+| `INSUFFICIENT_PERMISSIONS` | 403 | Missing required permissions | Use account with proper access |
+| `HTTP_404` | 404 | Invalid key/resource | Verify resource keys are correct |
+| `HTTP_429` | 429 | Rate limit exceeded | Implement request throttling |
 
 ## 🏗️ Development
 
@@ -865,6 +927,7 @@ await oauthClient.refreshAccessToken(sessionHandle);
 - [n8n Setup Guide](N8N_SETUP.md) - Workflow automation with n8n
 - [Integration Guide](INTEGRATION_GUIDE.md) - All integration options
 - [API Documentation](API_DOCUMENTATION.md) - Complete tool reference
+- [Error Handling Guide](ERROR_HANDLING.md) - Handle roster locks, auth errors, and more ✨
 
 ### External Links
 - [Yahoo Fantasy Sports API](https://developer.yahoo.com/fantasysports/guide/)

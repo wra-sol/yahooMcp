@@ -426,6 +426,84 @@ export class InsufficientPermissionsError extends YahooFantasyError {
   }
 }
 
+export class NetworkError extends YahooFantasyError {
+  public readonly originalError?: Error;
+
+  constructor(message: string, originalError?: Error) {
+    super(message, 'NETWORK_ERROR', undefined);
+    this.name = 'NetworkError';
+    this.originalError = originalError;
+    Object.setPrototypeOf(this, NetworkError.prototype);
+  }
+}
+
+export class RateLimitError extends YahooFantasyError {
+  public readonly retryAfter?: number;
+
+  constructor(message: string, retryAfter?: number, yahooError?: YahooApiError) {
+    super(message, 'RATE_LIMIT_EXCEEDED', 429, yahooError);
+    this.name = 'RateLimitError';
+    this.retryAfter = retryAfter;
+    Object.setPrototypeOf(this, RateLimitError.prototype);
+  }
+
+  toJSON() {
+    return {
+      status: 'ERROR',
+      error_type: this.code,
+      message: this.message,
+      retry_after_seconds: this.retryAfter,
+      recovery_suggestion: this.retryAfter 
+        ? `Rate limit exceeded. Retry after ${this.retryAfter} seconds.`
+        : 'Rate limit exceeded. Wait a few minutes before retrying.',
+      timestamp: new Date().toISOString(),
+      yahoo_error: this.yahooError
+    };
+  }
+}
+
+export class RosterConstraintError extends YahooFantasyError {
+  public readonly position?: string;
+  public readonly playerKey?: string;
+  public readonly constraintType?: 'position_filled' | 'invalid_position' | 'roster_limit' | 'other';
+
+  constructor(message: string, constraintType?: string, position?: string, playerKey?: string, yahooError?: YahooApiError) {
+    super(message, 'ROSTER_CONSTRAINT', 400, yahooError);
+    this.name = 'RosterConstraintError';
+    this.position = position;
+    this.playerKey = playerKey;
+    this.constraintType = constraintType as any || 'other';
+    Object.setPrototypeOf(this, RosterConstraintError.prototype);
+  }
+
+  toJSON() {
+    return {
+      status: 'ERROR',
+      error_type: this.code,
+      constraint_type: this.constraintType,
+      message: this.message,
+      position: this.position,
+      player_key: this.playerKey,
+      recovery_suggestion: this.getRecoverySuggestion(),
+      timestamp: new Date().toISOString(),
+      yahoo_error: this.yahooError
+    };
+  }
+
+  private getRecoverySuggestion(): string {
+    switch (this.constraintType) {
+      case 'position_filled':
+        return 'The target position is already occupied. First move the current player out of that position, then move the new player in.';
+      case 'invalid_position':
+        return 'The player is not eligible for the target position. Check the player\'s eligible positions.';
+      case 'roster_limit':
+        return 'Roster limit reached. You must drop a player before adding another.';
+      default:
+        return 'Roster constraint violation. Verify all position requirements and roster limits.';
+    }
+  }
+}
+
 // OAuth Types
 export interface OAuthCredentials {
   consumerKey: string;
