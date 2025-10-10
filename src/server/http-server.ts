@@ -563,12 +563,24 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
           this.sseTransports.set(sessionId, transport);
           console.error(`[MCP SSE] Session created: ${sessionId}`);
 
+          // Send keepalive heartbeats every 3 seconds to prevent timeout
+          const keepaliveInterval = setInterval(() => {
+            try {
+              // Send SSE comment (keepalive)
+              const keepalive = ': keepalive\n\n';
+              controller.enqueue(new TextEncoder().encode(keepalive));
+            } catch (e) {
+              clearInterval(keepaliveInterval);
+            }
+          }, 3000);
+
           // Connect MCP server to transport
           await this.mcpServer!.getServer().connect(transport);
 
           // Handle connection close
           req.signal.addEventListener('abort', () => {
             console.error(`[MCP SSE] Connection closed: ${sessionId}`);
+            clearInterval(keepaliveInterval);
             this.sseTransports.delete(sessionId);
             transport.close();
           });

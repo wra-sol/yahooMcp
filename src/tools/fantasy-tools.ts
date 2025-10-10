@@ -2171,14 +2171,41 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     console.error(`[buildTeamContext] Called with leagueKey=${leagueKey}, teamKey=${teamKey}, week=${options?.week || 'current'}`);
     const week = options?.week;
 
+    // Fetch data with progress logging
+    console.error(`[Progress] 1/4 Fetching league settings...`);
+    const leagueSettingsPromise = this.client.getLeagueSettings(leagueKey).then(result => {
+      console.error(`[Progress] ✓ League settings fetched`);
+      return result;
+    });
+
+    console.error(`[Progress] 2/4 Fetching team roster...`);
+    const teamPromise = this.client.getTeam(teamKey, { players: true }).then(result => {
+      console.error(`[Progress] ✓ Team roster fetched`);
+      return result;
+    });
+
+    console.error(`[Progress] 3/4 Fetching scoreboard...`);
+    const scoreboardPromise = this.client.getLeagueScoreboard(leagueKey, week).then(result => {
+      console.error(`[Progress] ✓ Scoreboard fetched`);
+      return result;
+    });
+
+    console.error(`[Progress] 4/4 Fetching matchups...`);
+    const matchupsPromise = this.client.getTeamMatchups(teamKey, week).then(result => {
+      console.error(`[Progress] ✓ Matchups fetched`);
+      return result;
+    });
+
     const [leagueSettingsRaw, teamWithPlayers, scoreboardResult, teamMatchupsResult] = await Promise.all([
-      this.client.getLeagueSettings(leagueKey) as any,
-      this.client.getTeam(teamKey, { players: true }) as any,
-      this.client.getLeagueScoreboard(leagueKey, week),
-      this.client.getTeamMatchups(teamKey, week),
+      leagueSettingsPromise,
+      teamPromise,
+      scoreboardPromise,
+      matchupsPromise,
     ]);
 
-    const leagueArray = Array.isArray(leagueSettingsRaw?.league) ? leagueSettingsRaw.league : [];
+    console.error(`[Progress] Processing results...`);
+
+    const leagueArray = Array.isArray((leagueSettingsRaw as any)?.league) ? (leagueSettingsRaw as any).league : [];
     const leagueMeta = leagueArray[0] ?? {};
     const settingsSection = leagueArray.find((entry: any) => entry?.settings)?.settings ?? [];
     const primarySettings = Array.isArray(settingsSection) ? settingsSection[0] ?? {} : {};
@@ -2188,7 +2215,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
       .map((stat: any) => stat?.stat?.display_name ?? stat?.stat?.abbr)
       .filter(Boolean);
 
-    const teamArray = Array.isArray(teamWithPlayers?.team) ? teamWithPlayers.team : [];
+    const teamArray = Array.isArray((teamWithPlayers as any)?.team) ? (teamWithPlayers as any).team : [];
     const teamMetaArray = Array.isArray(teamArray[0]) ? teamArray[0] : [];
     const teamMeta = this.flattenYahooObjectArray(teamMetaArray);
     const players = this.parseTeamPlayers(teamWithPlayers);
