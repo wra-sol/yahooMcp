@@ -852,6 +852,7 @@ The system will continue monitoring:
 □ For waiver claims, verify weekly_adds_remaining > 0
 □ FAAB budget checked (if applicable)
 □ Lock windows validated
+□ **IR Compliance**: Healthy players (no injury designation) cannot occupy IR/IR+ slots
 ```
 
 ### Tool Validation
@@ -885,6 +886,7 @@ The system will continue monitoring:
 8. **Strategic Adds**: High-value free agents acquired when available
 9. **Injury Management**: Injured players moved to IR slots promptly
 10. **Transaction Budget Awareness**: Never submit waiver claims when transaction limit is reached
+11. **IR Slot Compliance**: Healthy players are cleared from IR/IR+ slots before executing other roster moves
 
 ---
 
@@ -902,6 +904,7 @@ The system will continue monitoring:
    - Exceeding transaction limits (e.g., 5th add when limit is 4)
    - **Submitting waiver claims when transaction limit is reached (waiver claims count as adds)**
    - Spending more FAAB than available
+   - **Leaving healthy players (no injury designation) assigned to IR/IR+ slots**
 
 3. **❌ Validation Skipping**
    - Making transactions without full preflight validation

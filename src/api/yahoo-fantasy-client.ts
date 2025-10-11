@@ -803,7 +803,10 @@ export class YahooFantasyClient {
     if (response.league && Array.isArray(response.league)) {
       for (const item of response.league) {
         if (item.scoreboard) {
-          const matchupsCollection = item.scoreboard.matchups;
+          // Yahoo nests scoreboard data inside a "0" key
+          const scoreboardData = item.scoreboard["0"] || item.scoreboard;
+          const matchupsCollection = scoreboardData?.matchups;
+          
           if (matchupsCollection && typeof matchupsCollection === 'object') {
             const matchups: any[] = [];
             for (const key in matchupsCollection) {

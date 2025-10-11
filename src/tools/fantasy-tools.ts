@@ -58,6 +58,20 @@ const TransactionFiltersSchema = z.object({
   count: z.number().min(1).optional(),
 });
 
+interface StatCategoryMeta {
+  id: string;
+  name: string | null;
+  displayName: string | null;
+  abbreviation: string | null;
+  isLowerBetter: boolean;
+  index: number;
+}
+
+interface ParsedStatValue {
+  raw: string | number | null;
+  numeric: number | null;
+}
+
 export class FantasyTools {
   private client: YahooFantasyClient;
 
@@ -2228,8 +2242,20 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     console.error(`[Progress] Using week: ${targetWeek || 'default (current)'}`);
 
     // Now fetch remaining data in parallel with correct week
-    console.error(`[Progress] 2/4 Fetching team roster...`);
-    const teamPromise = this.client.getTeam(teamKey, { players: true }).then(result => {
+    console.error(`[Progress] 2/4 Fetching team metadata...`);
+    const teamPromise = this.client.getTeam(teamKey).then(result => {
+      console.error(`[Progress] ✓ Team metadata fetched`);
+      return result;
+    });
+    
+    console.error(`[Progress] 2b/4 Fetching team roster with lineup positions...`);
+    // Use makeRequest directly to get raw response with roster structure
+    // For daily lock leagues, use date parameter; for weekly leagues, use week parameter
+    const isDaily = leagueMeta.weekly_deadline === 'intraday';
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+    const rosterParam = isDaily ? `;date=${today}` : (targetWeek ? `;week=${targetWeek}` : '');
+    console.error(`[Progress] Roster param: ${rosterParam} (isDaily: ${isDaily})`);
+    const rosterPromise = this.client['makeRequest']<any>('GET', `/team/${teamKey}/roster${rosterParam}`).then(result => {
       console.error(`[Progress] ✓ Team roster fetched`);
       return result;
     });
@@ -2246,8 +2272,9 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
       return result;
     });
 
-    const [teamWithPlayers, scoreboardResult, teamMatchupsResult] = await Promise.all([
+    const [teamMetadata, rosterResult, scoreboardResult, teamMatchupsResult] = await Promise.all([
       teamPromise,
+      rosterPromise,
       scoreboardPromise,
       matchupsPromise,
     ]);
@@ -2259,14 +2286,19 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     const primarySettings = Array.isArray(settingsSection) ? settingsSection[0] ?? {} : {};
 
     const rosterSummary = this.parseRosterPositionsSummary(primarySettings.roster_positions);
-    const statCategories = (primarySettings.stat_categories?.stats ?? [])
-      .map((stat: any) => stat?.stat?.display_name ?? stat?.stat?.abbr)
-      .filter(Boolean);
+    const statCategoryMeta = this.buildStatCategoryMeta(primarySettings.stat_categories?.stats);
+    const statCategories = statCategoryMeta.order.map((statId: string) => {
+      const meta = statCategoryMeta.map.get(statId);
+      return meta?.displayName || meta?.abbreviation || meta?.name || statId;
+    });
 
-    const teamArray = Array.isArray((teamWithPlayers as any)?.team) ? (teamWithPlayers as any).team : [];
+    // Parse team metadata from team endpoint
+    const teamArray = Array.isArray((teamMetadata as any)?.team) ? (teamMetadata as any).team : [];
     const teamMetaArray = Array.isArray(teamArray[0]) ? teamArray[0] : [];
     const teamMeta = this.flattenYahooObjectArray(teamMetaArray);
-    const players = this.parseTeamPlayers(teamWithPlayers);
+    
+    // Parse players from roster endpoint (includes lineup positions)
+    const players = this.parseTeamPlayers(rosterResult);
 
     const totalSpots = rosterSummary.total || players.length;
     const availableSpots = Math.max(totalSpots - players.length, 0);
@@ -2279,9 +2311,24 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
         : null;
 
     const filledPositions = this.summarizeFilledPositions(players);
+    
+    // Count bench and IR players
+    let benchCount = 0;
+    let irCount = 0;
+    let startersCount = 0;
+    for (const player of players) {
+      const lineupPos = player.lineup_position;
+      if (lineupPos === 'BN') {
+        benchCount++;
+      } else if (lineupPos === 'IR' || lineupPos === 'IR+' || lineupPos === 'IL' || lineupPos === 'IL+') {
+        irCount++;
+      } else if (lineupPos && lineupPos !== 'BN') {
+        startersCount++;
+      }
+    }
 
-    const scoreboardMatchup = this.findMatchupForTeam(teamKey, scoreboardResult.matchups);
-    const teamMatchup = this.findMatchupForTeam(teamKey, teamMatchupsResult.matchups);
+    const scoreboardMatchup = this.findMatchupForTeam(teamKey, scoreboardResult.matchups, statCategoryMeta);
+    const teamMatchup = this.findMatchupForTeam(teamKey, teamMatchupsResult.matchups, statCategoryMeta);
     const chosenMatchup = scoreboardMatchup || teamMatchup;
 
     // currentWeek was already extracted from leagueMeta above; convert to number for display
@@ -2338,9 +2385,9 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
         players,
         position_analysis: {
           filled_positions: filledPositions,
-          bench: null,
-          ir: null,
-          notes: 'Lineup positions not provided by Yahoo response; counts derived from listed player positions only.',
+          starters: startersCount,
+          bench: benchCount,
+          ir: irCount,
         },
       },
       current_matchup: {
@@ -2369,73 +2416,64 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
 
   private flattenYahooObjectArray(items: any[]): Record<string, any> {
     const result: Record<string, any> = {};
-    
+
     if (!items || !Array.isArray(items)) {
       return result;
     }
-    
-    // Yahoo has TWO different formats:
-    // Format 1: [ [{prop1}, {prop2}, ...] ] - items[0] is itself an array of property objects
-    // Format 2: [ { "0": {...}, "1": {...} } ] - items[0] is an object with numeric keys
-    
-    // Handle Format 1: If items[0] is an array, flatten that array directly
-    if (items.length > 0 && Array.isArray(items[0])) {
-      for (const item of items[0]) {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) {
-          continue;
-        }
-        for (const [key, value] of Object.entries(item)) {
-          if (result[key] === undefined) {
-            result[key] = value;
-          }
+
+    const addEntries = (obj: any): void => {
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+        return;
+      }
+      for (const [key, value] of Object.entries(obj)) {
+        if (result[key] === undefined) {
+          result[key] = value;
         }
       }
-      return result;
-    }
-    
-    // Handle Format 2: Yahoo nested numeric-keyed objects
+    };
+
+    // Handle Format 2: [{ "0": {...}, "1": {...}, extra: ... }]
     if (items.length === 1 && typeof items[0] === 'object' && !Array.isArray(items[0])) {
       const firstItem = items[0];
       const keys = Object.keys(firstItem);
-      const numericKeys = keys.filter(k => /^\d+$/.test(k));
-      
-      // If we have numeric keys, extract their values and flatten
+      const numericKeys = keys.filter((k) => /^\d+$/.test(k));
+
       if (numericKeys.length > 0) {
         for (const key of numericKeys.sort((a, b) => Number(a) - Number(b))) {
-          const val = firstItem[key];
-          if (val && typeof val === 'object' && !Array.isArray(val)) {
-            for (const [k, v] of Object.entries(val)) {
-              if (result[k] === undefined) {
-                result[k] = v;
-              }
-            }
-          }
+          addEntries(firstItem[key]);
         }
-        
-        // Also include any non-numeric keys directly
         for (const key of keys) {
           if (!/^\d+$/.test(key) && result[key] === undefined) {
             result[key] = firstItem[key];
           }
         }
-        
         if (Object.keys(result).length > 0) {
           return result;
         }
       }
     }
-    
-    // Standard flattening for normal arrays
-    for (const item of items || []) {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) {
-        continue;
-      }
-      for (const [key, value] of Object.entries(item)) {
-        if (result[key] === undefined) {
-          result[key] = value;
-        }
+
+    // Handle Format 1: [ [{...}, {...}], {...}, ... ]
+    let consumedPrimaryArray = false;
+    if (items.length > 0 && Array.isArray(items[0])) {
+      consumedPrimaryArray = true;
+      for (const nested of items[0]) {
+        addEntries(nested);
       }
     }
+
+    const startIndex = consumedPrimaryArray ? 1 : 0;
+    for (let i = startIndex; i < items.length; i++) {
+      const item = items[i];
+      if (Array.isArray(item)) {
+        for (const nested of item) {
+          addEntries(nested);
+        }
+        continue;
+      }
+      addEntries(item);
+    }
+
     return result;
   }
 
@@ -2491,7 +2529,9 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
         continue;
       }
       
+      // Debug: Show raw player structure before flattening
       const flattened = this.flattenYahooObjectArray(playerEntryArray);
+
       const eligibility = Array.isArray(flattened.eligible_positions)
         ? flattened.eligible_positions.map((pos: any) => pos?.position).filter(Boolean)
         : [];
@@ -2499,12 +2539,22 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
         ? flattened.eligible_positions_to_add.map((pos: any) => pos?.position).filter(Boolean)
         : [];
 
+      let lineupPosition: string | null = null;
+      const selectedPositionRaw = flattened.selected_position;
+
+      if (Array.isArray(selectedPositionRaw)) {
+        const selectedPosFlattened = this.flattenYahooObjectArray(selectedPositionRaw);
+        lineupPosition = selectedPosFlattened.position || selectedPosFlattened.slot || null;
+      } else if (selectedPositionRaw && typeof selectedPositionRaw === 'object') {
+        lineupPosition = selectedPositionRaw.position || selectedPositionRaw.slot || null;
+      }
+
       players.push({
         player_key: flattened.player_key || null,
         name: flattened.name?.full || null,
         position: flattened.display_position || flattened.primary_position || null,
         team: flattened.editorial_team_abbr || flattened.editorial_team_full_name || null,
-        lineup_position: flattened.selected_position?.position || null,
+        lineup_position: lineupPosition,
         injury_status: flattened.status || flattened.injury_status || null,
         eligibility,
         eligible_positions_to_add: eligibleToAdd,
@@ -2555,11 +2605,27 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     return deadline;
   }
 
-  private findMatchupForTeam(teamKey: string, matchups: any[]): {
+  private findMatchupForTeam(
+    teamKey: string,
+    matchups: any[],
+    statCategoryMeta?: { map: Map<string, StatCategoryMeta>; order: string[] }
+  ): {
     week: number | null;
     status: string | null;
     opponent: { team_key: string | null; team_name: string | null } | null;
-    scores: { your_team: number | null; opponent: number | null } | null;
+    scores: {
+      total: { your_team: number | null; opponent: number | null } | null;
+      categories: Array<{
+        id: string;
+        name: string | null;
+        display_name: string | null;
+        abbreviation: string | null;
+        is_lower_better: boolean;
+        your_team: { value: string | number | null; numeric: number | null };
+        opponent: { value: string | number | null; numeric: number | null };
+        winner: 'you' | 'opponent' | 'tie' | null;
+      }>;
+    } | null;
   } | null {
     if (!Array.isArray(matchups)) {
       return null;
@@ -2576,7 +2642,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
       const teams = this.parseMatchupTeams(teamsContainer);
       if (!teams.length) continue;
 
-      const selfTeam = teams.find((team) => team.team_key === teamKey);
+      const selfTeam = teams.find((team) => team.team_key === teamKey) || null;
       if (!selfTeam) continue;
       const opponentTeam = teams.find((team) => team.team_key !== teamKey) || null;
 
@@ -2588,6 +2654,32 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
         null;
       const weekNumber = weekValue ? Number(weekValue) || null : null;
 
+      const totalScores = this.buildScorePayload(selfTeam, opponentTeam);
+      const statWinnersContainer =
+        metadata.stat_winners ||
+        matchupEntry.find((item: any) => item?.stat_winners)?.stat_winners ||
+        null;
+
+      const categories =
+        statCategoryMeta && selfTeam && opponentTeam
+          ? this.buildCategoryScoreBreakdown(
+              selfTeam,
+              opponentTeam,
+              statCategoryMeta,
+              statWinnersContainer,
+              teamKey,
+              opponentTeam?.team_key || null
+            )
+          : [];
+
+      const scoresPayload =
+        totalScores !== null || categories.length
+          ? {
+              total: totalScores,
+              categories,
+            }
+          : null;
+
       return {
         week: weekNumber,
         status: metadata.status || null,
@@ -2597,7 +2689,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
               team_name: opponentTeam.name || null,
             }
           : null,
-        scores: this.buildScorePayload(selfTeam, opponentTeam),
+        scores: scoresPayload,
       };
     }
 
@@ -2613,14 +2705,416 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     for (const key in teamsContainer) {
       if (key === 'count') continue;
       const teamEntry = teamsContainer[key]?.team;
+      
+      // Always flatten if it's an array (Yahoo's standard structure)
       if (Array.isArray(teamEntry)) {
         teams.push(this.flattenYahooObjectArray(teamEntry));
       } else if (teamEntry && typeof teamEntry === 'object') {
+        // Even if not an array, might have nested arrays in fields
         teams.push(teamEntry);
       }
     }
 
     return teams;
+  }
+
+  private buildCategoryScoreBreakdown(
+    selfTeam: Record<string, any> | null,
+    opponentTeam: Record<string, any> | null,
+    statCategoryMeta: { map: Map<string, StatCategoryMeta>; order: string[] },
+    statWinnersContainer: any,
+    selfTeamKey: string,
+    opponentTeamKey: string | null
+  ): Array<{
+    id: string;
+    name: string | null;
+    display_name: string | null;
+    abbreviation: string | null;
+    is_lower_better: boolean;
+    your_team: { value: string | number | null; numeric: number | null };
+    opponent: { value: string | number | null; numeric: number | null };
+    winner: 'you' | 'opponent' | 'tie' | null;
+  }> {
+    if (!selfTeam || !opponentTeam) {
+      return [];
+    }
+
+    const selfStats = this.parseTeamStatValues(selfTeam);
+    const opponentStats = this.parseTeamStatValues(opponentTeam);
+    const statWinners = this.parseStatWinners(statWinnersContainer);
+
+    const allStatIds = new Set<string>();
+    for (const id of statCategoryMeta.order) {
+      allStatIds.add(id);
+    }
+    for (const id of Object.keys(selfStats)) {
+      allStatIds.add(id);
+    }
+    for (const id of Object.keys(opponentStats)) {
+      allStatIds.add(id);
+    }
+    for (const id of Object.keys(statWinners)) {
+      allStatIds.add(id);
+    }
+
+    const orderedStatIds = Array.from(allStatIds).sort((a, b) => {
+      const metaA = statCategoryMeta.map.get(a);
+      const metaB = statCategoryMeta.map.get(b);
+      const indexA = metaA?.index ?? Number.MAX_SAFE_INTEGER;
+      const indexB = metaB?.index ?? Number.MAX_SAFE_INTEGER;
+      if (indexA !== indexB) {
+        return indexA - indexB;
+      }
+      return a.localeCompare(b);
+    });
+
+    const breakdown = orderedStatIds.map((statId) => {
+      const meta = statCategoryMeta.map.get(statId);
+      const baseIsLowerBetter = meta?.isLowerBetter ?? false;
+      const yourStat = selfStats[statId] ?? { raw: null, numeric: null };
+      const oppStat = opponentStats[statId] ?? { raw: null, numeric: null };
+      const winnerInfo = statWinners[statId];
+      const displayName = meta?.displayName ?? meta?.name ?? meta?.abbreviation ?? statId;
+      const name = meta?.name ?? meta?.displayName ?? meta?.abbreviation ?? statId;
+      const abbreviation = meta?.abbreviation ?? null;
+
+      let winner: 'you' | 'opponent' | 'tie' | null = null;
+
+      if (winnerInfo) {
+        if (winnerInfo.isTie) {
+          winner = 'tie';
+        } else if (winnerInfo.winnerTeamKey === selfTeamKey) {
+          winner = 'you';
+        } else if (winnerInfo.winnerTeamKey === opponentTeamKey) {
+          winner = 'opponent';
+        }
+      }
+
+      if (!winner && yourStat.numeric !== null && oppStat.numeric !== null) {
+        if (yourStat.numeric === oppStat.numeric) {
+          winner = 'tie';
+        } else if (baseIsLowerBetter) {
+          winner = yourStat.numeric < oppStat.numeric ? 'you' : 'opponent';
+        } else {
+          winner = yourStat.numeric > oppStat.numeric ? 'you' : 'opponent';
+        }
+      }
+
+      let finalIsLowerBetter = baseIsLowerBetter;
+
+      if (
+        winnerInfo &&
+        winnerInfo.winnerTeamKey &&
+        yourStat.numeric !== null &&
+        oppStat.numeric !== null &&
+        yourStat.numeric !== oppStat.numeric
+      ) {
+        if (winnerInfo.winnerTeamKey === selfTeamKey) {
+          finalIsLowerBetter = yourStat.numeric < oppStat.numeric;
+        } else if (winnerInfo.winnerTeamKey === opponentTeamKey) {
+          finalIsLowerBetter = oppStat.numeric < yourStat.numeric;
+        }
+      } else if (
+        !winnerInfo &&
+        winner &&
+        winner !== 'tie' &&
+        yourStat.numeric !== null &&
+        oppStat.numeric !== null &&
+        yourStat.numeric !== oppStat.numeric
+      ) {
+        const winningNumeric = winner === 'you' ? yourStat.numeric : oppStat.numeric;
+        const losingNumeric = winner === 'you' ? oppStat.numeric : yourStat.numeric;
+        finalIsLowerBetter = winningNumeric < losingNumeric;
+      }
+
+      return {
+        id: statId,
+        name,
+        display_name: displayName,
+        abbreviation,
+        is_lower_better: finalIsLowerBetter,
+        your_team: {
+          value: yourStat.raw,
+          numeric: yourStat.numeric,
+        },
+        opponent: {
+          value: oppStat.raw,
+          numeric: oppStat.numeric,
+        },
+        winner,
+      };
+    });
+
+    return breakdown;
+  }
+
+  private parseTeamStatValues(team: Record<string, any> | null): Record<string, ParsedStatValue> {
+    if (!team) {
+      return {};
+    }
+
+    const statsContainer =
+      team.team_stats ??
+      team.teamStats ??
+      team.stats ??
+      team.team_statistics ??
+      null;
+
+    if (!statsContainer) {
+      return {};
+    }
+
+    const entries = this.extractStatEntries(statsContainer);
+    const values: Record<string, ParsedStatValue> = {};
+
+    for (const entry of entries) {
+      if (!entry) {
+        continue;
+      }
+      let statObj = entry.stat ?? entry;
+      if (!statObj) {
+        continue;
+      }
+      if (Array.isArray(statObj)) {
+        statObj = this.flattenYahooObjectArray(statObj);
+      }
+      if (!statObj || typeof statObj !== 'object') {
+        continue;
+      }
+      const statIdRaw = statObj.stat_id ?? statObj.statId ?? statObj.id;
+      if (!statIdRaw) {
+        continue;
+      }
+      const statId = String(statIdRaw);
+      if (values[statId]) {
+        continue;
+      }
+      let rawValue =
+        statObj.value ??
+        statObj.total ??
+        statObj.points ??
+        statObj.score ??
+        null;
+      if (rawValue === undefined) {
+        rawValue = null;
+      }
+      const numeric = this.parseNumericValue(rawValue);
+      values[statId] = {
+        raw: rawValue,
+        numeric,
+      };
+    }
+
+    return values;
+  }
+
+  private parseStatWinners(statWinnersContainer: any): Record<string, { winnerTeamKey: string | null; isTie: boolean }> {
+    const winners: Record<string, { winnerTeamKey: string | null; isTie: boolean }> = {};
+    if (!statWinnersContainer) {
+      return winners;
+    }
+
+    const entries = this.extractStatEntries(statWinnersContainer);
+    for (const entry of entries) {
+      if (!entry) {
+        continue;
+      }
+      let winnerObj = entry.stat_winner ?? entry.stat ?? entry;
+      if (!winnerObj) {
+        continue;
+      }
+      if (Array.isArray(winnerObj)) {
+        winnerObj = this.flattenYahooObjectArray(winnerObj);
+      }
+      if (!winnerObj || typeof winnerObj !== 'object') {
+        continue;
+      }
+      const statIdRaw = winnerObj.stat_id ?? winnerObj.statId ?? winnerObj.id;
+      if (!statIdRaw) {
+        continue;
+      }
+      const statId = String(statIdRaw);
+      const winnerTeamKey = winnerObj.winner_team_key ?? winnerObj.winnerTeamKey ?? null;
+      const isTie =
+        winnerObj.is_tie === '1' ||
+        winnerObj.is_tie === 1 ||
+        winnerObj.result === 'tie' ||
+        (!winnerTeamKey && winnerObj.is_tie !== undefined);
+      winners[statId] = {
+        winnerTeamKey: winnerTeamKey ? String(winnerTeamKey) : null,
+        isTie,
+      };
+    }
+
+    return winners;
+  }
+
+  private buildStatCategoryMeta(statsRaw: any): { map: Map<string, StatCategoryMeta>; order: string[] } {
+    const map = new Map<string, StatCategoryMeta>();
+    const order: string[] = [];
+
+    if (!statsRaw) {
+      return { map, order };
+    }
+
+    const entries = this.extractStatEntries(statsRaw);
+    let index = 0;
+
+    for (const entry of entries) {
+      if (!entry) {
+        continue;
+      }
+      let statObj = entry.stat ?? entry;
+      if (!statObj) {
+        continue;
+      }
+      if (Array.isArray(statObj)) {
+        statObj = this.flattenYahooObjectArray(statObj);
+      }
+      if (!statObj || typeof statObj !== 'object') {
+        continue;
+      }
+      const statIdRaw = statObj.stat_id ?? statObj.statId ?? statObj.id;
+      if (!statIdRaw) {
+        continue;
+      }
+      const statId = String(statIdRaw);
+      if (map.has(statId)) {
+        continue;
+      }
+      const displayName =
+        statObj.display_name ??
+        statObj.name ??
+        statObj.abbr ??
+        statObj.displayName ??
+        null;
+      const name = statObj.name ?? statObj.display_name ?? statObj.abbr ?? null;
+      const abbreviation = statObj.abbr ?? null;
+      const sortOrderRaw =
+        statObj.sort_order ??
+        statObj.sortOrder ??
+        statObj.sort ??
+        null;
+      const sortOrder =
+        sortOrderRaw !== undefined && sortOrderRaw !== null
+          ? String(sortOrderRaw).trim().toLowerCase()
+          : null;
+
+      let isLowerBetter = false;
+      if (sortOrder) {
+        if (sortOrder === 'asc' || sortOrder === 'ascending') {
+          isLowerBetter = true;
+        } else if (sortOrder === 'desc' || sortOrder === 'descending') {
+          isLowerBetter = false;
+        } else {
+          const numericSort = Number(sortOrder);
+          if (!Number.isNaN(numericSort)) {
+            if (numericSort < 0) {
+              isLowerBetter = true;
+            } else if (numericSort > 0) {
+              isLowerBetter = false;
+            } else if (numericSort === 0) {
+              isLowerBetter = true;
+            }
+          }
+        }
+      }
+
+      const reverseFlag = statObj.is_reverse ?? statObj.isReverse ?? null;
+      if (reverseFlag !== undefined && reverseFlag !== null) {
+        const reverse = String(reverseFlag).trim().toLowerCase();
+        if (reverse === '1' || reverse === 'true') {
+          isLowerBetter = !isLowerBetter;
+        }
+      }
+
+      const normalizedName = (displayName || name || abbreviation || '').toLowerCase();
+      if (!isLowerBetter) {
+        if (
+          normalizedName.includes('against') ||
+          normalizedName.includes('allowed') ||
+          normalizedName.includes('against average') ||
+          normalizedName.includes('gaa') ||
+          normalizedName.includes('era') ||
+          normalizedName.includes('whip') ||
+          normalizedName.includes('pim') ||
+          normalizedName.includes('penalty minutes') ||
+          normalizedName.includes('turnover') ||
+          normalizedName.includes('errors')
+        ) {
+          isLowerBetter = true;
+        }
+      }
+
+      map.set(statId, {
+        id: statId,
+        name: name ? String(name) : null,
+        displayName: displayName ? String(displayName) : null,
+        abbreviation: abbreviation ? String(abbreviation) : null,
+        isLowerBetter,
+        index,
+      });
+      order.push(statId);
+      index += 1;
+    }
+
+    return { map, order };
+  }
+
+  private extractStatEntries(container: any): any[] {
+    if (!container) {
+      return [];
+    }
+
+    if (Array.isArray(container)) {
+      const collected: any[] = [];
+      for (const item of container) {
+        if (!item) {
+          continue;
+        }
+        if (typeof item === 'object') {
+          if (item.stat || item.stat_winner || item.stat_id || item.statId) {
+            collected.push(item);
+          } else {
+            collected.push(...this.extractStatEntries(item));
+          }
+        }
+      }
+      return collected;
+    }
+
+    if (typeof container === 'object') {
+      if (container.stat || container.stat_winner || container.stat_id || container.statId) {
+        return [container];
+      }
+      const collected: any[] = [];
+      if (container.stats !== undefined) {
+        collected.push(...this.extractStatEntries(container.stats));
+      } else {
+        for (const key of Object.keys(container)) {
+          if (key === 'count') {
+            continue;
+          }
+          collected.push(...this.extractStatEntries(container[key]));
+        }
+      }
+      return collected;
+    }
+
+    return [];
+  }
+
+  private parseNumericValue(value: any): number | null {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
   }
 
   private buildScorePayload(
@@ -2640,7 +3134,15 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
 
   private extractTeamScore(team: Record<string, any> | null): number | null {
     if (!team) return null;
-    const points = team.team_points || team.points || team.score || null;
+    
+    // Try multiple field names
+    let points = team.team_points || team.points || team.score || null;
+    
+    // If points is an array (Yahoo's nested structure), flatten it first
+    if (Array.isArray(points)) {
+      points = this.flattenYahooObjectArray(points);
+    }
+    
     if (!points) return null;
 
     if (typeof points === 'object') {
