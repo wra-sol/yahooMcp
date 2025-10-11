@@ -1779,17 +1779,23 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
         case 'get_league_teams':
           return await this.client.getLeagueTeams(args.leagueKey, args.filters);
 
-        case 'get_league_scoreboard':
-          return await this.client.getLeagueScoreboard(args.leagueKey, args.week);
+        case 'get_league_scoreboard': {
+          const week = args.week || await this.getCurrentWeek(args.leagueKey);
+          return await this.client.getLeagueScoreboard(args.leagueKey, week);
+        }
 
-        case 'get_matchup_details':
-          return await this.client.getMatchupDetails(args.leagueKey, args.week, args.teamKeys);
+        case 'get_matchup_details': {
+          const week = args.week || await this.getCurrentWeek(args.leagueKey);
+          return await this.client.getMatchupDetails(args.leagueKey, week, args.teamKeys);
+        }
 
         case 'get_league_stats':
           return await this.client.getLeagueStats(args.leagueKey);
 
-        case 'get_live_scores':
-          return await this.client.getLiveScores(args.leagueKey, args.week);
+        case 'get_live_scores': {
+          const week = args.week || await this.getCurrentWeek(args.leagueKey);
+          return await this.client.getLiveScores(args.leagueKey, week);
+        }
 
         case 'get_game_updates':
           return await this.client.getGameUpdates(args.gameKey);
@@ -1803,11 +1809,17 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
         case 'get_team':
           return await this.client.getTeam(args.teamKey, args.filters);
 
-        case 'get_team_roster':
-          return await this.client.getTeamRoster(args.teamKey, args.week);
+        case 'get_team_roster': {
+          const leagueKey = this.extractLeagueKeyFromTeamKey(args.teamKey);
+          const week = args.week || await this.getCurrentWeek(leagueKey);
+          return await this.client.getTeamRoster(args.teamKey, week);
+        }
 
-        case 'get_team_matchups':
-          return await this.client.getTeamMatchups(args.teamKey, args.week);
+        case 'get_team_matchups': {
+          const leagueKey = this.extractLeagueKeyFromTeamKey(args.teamKey);
+          const week = args.week || await this.getCurrentWeek(leagueKey);
+          return await this.client.getTeamMatchups(args.teamKey, week);
+        }
 
         case 'get_team_transactions':
           return await this.client.getTeamTransactions(args.teamKey, args.filters);
@@ -2163,21 +2175,59 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     return this.client;
   }
 
+  /**
+   * Helper method to extract league key from team key
+   * Team key format: "gameId.l.leagueId.t.teamId"
+   * League key format: "gameId.l.leagueId"
+   */
+  private extractLeagueKeyFromTeamKey(teamKey: string): string {
+    const parts = teamKey.split('.');
+    if (parts.length >= 3 && parts[1] === 'l') {
+      return `${parts[0]}.${parts[1]}.${parts[2]}`;
+    }
+    throw new Error(`Invalid team key format: ${teamKey}`);
+  }
+
+  /**
+   * Helper method to get the current week from league settings
+   * This ensures we're always using the league's actual current week
+   */
+  private async getCurrentWeek(leagueKey: string): Promise<string | undefined> {
+    try {
+      const leagueSettings = await this.client.getLeagueSettings(leagueKey);
+      const leagueArray = Array.isArray((leagueSettings as any)?.league) 
+        ? (leagueSettings as any).league 
+        : [];
+      const leagueMeta = leagueArray[0] ?? {};
+      return leagueMeta.current_week;
+    } catch (error) {
+      console.error(`[getCurrentWeek] Failed to fetch current week for ${leagueKey}:`, error);
+      return undefined;
+    }
+  }
+
   private async buildTeamContext(
     leagueKey: string,
     teamKey: string,
     options?: { week?: string }
   ): Promise<any> {
     console.error(`[buildTeamContext] Called with leagueKey=${leagueKey}, teamKey=${teamKey}, week=${options?.week || 'current'}`);
-    const week = options?.week;
-
-    // Fetch data with progress logging
+    
+    // First, fetch league settings to get current_week
     console.error(`[Progress] 1/4 Fetching league settings...`);
-    const leagueSettingsPromise = this.client.getLeagueSettings(leagueKey).then(result => {
-      console.error(`[Progress] ✓ League settings fetched`);
-      return result;
-    });
+    const leagueSettingsRaw = await this.client.getLeagueSettings(leagueKey);
+    console.error(`[Progress] ✓ League settings fetched`);
 
+    // Extract current_week from league settings
+    const leagueArray = Array.isArray((leagueSettingsRaw as any)?.league) ? (leagueSettingsRaw as any).league : [];
+    const leagueMeta = leagueArray[0] ?? {};
+    const currentWeek = leagueMeta.current_week;
+    
+    // Use provided week, or fall back to current_week from league settings
+    const targetWeek = options?.week || currentWeek;
+    console.error(`[Progress] Using week: ${targetWeek || 'default (current)'}`);
+
+    // Now fetch remaining data in parallel with correct week
     console.error(`[Progress] 2/4 Fetching team roster...`);
     const teamPromise = this.client.getTeam(teamKey, { players: true }).then(result => {
       console.error(`[Progress] ✓ Team roster fetched`);
@@ -2185,19 +2235,18 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     });
 
     console.error(`[Progress] 3/4 Fetching scoreboard...`);
-    const scoreboardPromise = this.client.getLeagueScoreboard(leagueKey, week).then(result => {
+    const scoreboardPromise = this.client.getLeagueScoreboard(leagueKey, targetWeek).then(result => {
       console.error(`[Progress] ✓ Scoreboard fetched`);
       return result;
     });
 
     console.error(`[Progress] 4/4 Fetching matchups...`);
-    const matchupsPromise = this.client.getTeamMatchups(teamKey, week).then(result => {
+    const matchupsPromise = this.client.getTeamMatchups(teamKey, targetWeek).then(result => {
       console.error(`[Progress] ✓ Matchups fetched`);
       return result;
     });
 
-    const [leagueSettingsRaw, teamWithPlayers, scoreboardResult, teamMatchupsResult] = await Promise.all([
-      leagueSettingsPromise,
+    const [teamWithPlayers, scoreboardResult, teamMatchupsResult] = await Promise.all([
       teamPromise,
       scoreboardPromise,
       matchupsPromise,
@@ -2205,8 +2254,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
 
     console.error(`[Progress] Processing results...`);
 
-    const leagueArray = Array.isArray((leagueSettingsRaw as any)?.league) ? (leagueSettingsRaw as any).league : [];
-    const leagueMeta = leagueArray[0] ?? {};
+    // leagueArray and leagueMeta already extracted above after fetching league settings
     const settingsSection = leagueArray.find((entry: any) => entry?.settings)?.settings ?? [];
     const primarySettings = Array.isArray(settingsSection) ? settingsSection[0] ?? {} : {};
 
@@ -2236,7 +2284,8 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     const teamMatchup = this.findMatchupForTeam(teamKey, teamMatchupsResult.matchups);
     const chosenMatchup = scoreboardMatchup || teamMatchup;
 
-    const currentWeek = Number(leagueMeta.current_week || chosenMatchup?.week || 0) || null;
+    // currentWeek was already extracted from leagueMeta above; convert to number for display
+    const currentWeekFormatted = Number(currentWeek || chosenMatchup?.week || 0) || null;
 
     const errors: string[] = [];
     if (!players.length) {
@@ -2295,7 +2344,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
         },
       },
       current_matchup: {
-        week: chosenMatchup?.week ?? currentWeek,
+        week: chosenMatchup?.week ?? currentWeekFormatted,
         opponent: chosenMatchup?.opponent ?? null,
         scores: chosenMatchup?.scores ?? null,
         status: chosenMatchup?.status ?? (scoreboardMatchup ? 'in_progress' : 'not_started'),

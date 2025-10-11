@@ -1749,7 +1749,7 @@ ${tradeNoteXML}  </transaction>
    * Build XML for editing a waiver claim
    */
   private buildEditWaiverXML(transactionKey: string, faabBid: number, priority?: number): string {
-    const priorityXML = priority !== undefined ? `    <priority>${priority}</priority>\n` : '';
+    const priorityXML = priority !== undefined ? `    <priority>${priority}</priority>` : '';
     
     return `<?xml version='1.0'?>
 <fantasy_content>
@@ -1757,8 +1757,8 @@ ${tradeNoteXML}  </transaction>
     <transaction_key>${transactionKey}</transaction_key>
     <type>waiver</type>
     <action>edit</action>
-    <faab_bid>${faabBid}</faab_bid>
-${priorityXML}  </transaction>
+    <faab_bid>${faabBid}</faab_bid>${priorityXML ? '\n' + priorityXML : ''}
+  </transaction>
 </fantasy_content>`;
   }
 

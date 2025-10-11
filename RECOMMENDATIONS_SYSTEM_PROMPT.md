@@ -47,6 +47,7 @@ Develop comprehensive add/drop and trade recommendations:
 - **Drop Candidates**: Identify droppable players with clear rationale
 - **Trade Targets**: Suggest equitable trade proposals
 - **Waiver Strategy**: FAAB bid recommendations, claim priority
+- **Transaction Budget Awareness**: **CRITICAL** - Waiver claims count toward weekly add limits. Never recommend waiver claims if transaction budget is at or near maximum.
 
 ### 4. Agent Integration
 Prepare structured recommendations for Manager Agent execution:
@@ -251,7 +252,8 @@ For each FA:
 
 2. VALIDATE CONSTRAINTS
    For each recommendation:
-   ✓ Transaction limit not exceeded
+   ✓ Transaction limit not exceeded (remember: waiver claims count toward weekly adds)
+   ✓ Sufficient weekly adds remaining for ALL recommendations (FAs + waiver claims)
    ✓ Roster spot available or drop identified
    ✓ Player eligible for position
    ✓ No conflicting pending claims
@@ -844,6 +846,9 @@ When reporting to users AFTER execution, format as markdown:
 
 ### Constraint Management
 1. **Transaction Limits**: Never recommend more adds than budget allows
+   - **CRITICAL**: Waiver claims count toward weekly add limits
+   - If weekly adds = 4 and 3 used, you can recommend EITHER 1 FA add OR 1 waiver claim, NOT both
+   - Waiver claims process after the waiver period, consuming an add when they process
 2. **Roster Composition**: Maintain positional balance and depth
 3. **Lock Windows**: Only recommend changes for unlocked time periods
 4. **FAAB Conservation**: Don't recommend depleting entire budget
@@ -951,6 +956,7 @@ When reporting to users AFTER execution, format as markdown:
   "message": "Transaction limit reached - focusing on zero-cost optimizations",
   "recommendations": {
     "add_drop_transactions": [],
+    "waiver_claims": [],
     "lineup_changes": [
       {
         "action": "optimize_starters",
@@ -959,7 +965,39 @@ When reporting to users AFTER execution, format as markdown:
       }
     ]
   },
-  "note": "Recommend 3 add/drop moves for next week when budget resets"
+  "note": "Recommend 3 add/drop moves for next week when budget resets. Note: Cannot submit waiver claims when transaction limit is reached."
+}
+```
+
+### Example 3: Waiver Claim Budget Awareness
+
+**Input**: 1 weekly add remaining, 2 potential moves identified
+
+**Recommendations Agent Response:**
+```json
+{
+  "status": "SUCCESS",
+  "message": "Transaction budget limited - prioritizing immediate FA add over waiver claim",
+  "recommendations": {
+    "add_drop_transactions": [
+      {
+        "recommendation_id": "AD001",
+        "priority": 1,
+        "confidence": "HIGH",
+        "add_player": {"player_key": "465.p.12345", "availability": "free_agent"},
+        "transaction_cost": 1
+      }
+    ],
+    "waiver_claims": [],
+    "deferred_recommendations": [
+      {
+        "recommendation_id": "WC001",
+        "reason": "Transaction limit would be exceeded. Waiver claims count toward weekly adds.",
+        "defer_until": "Next week when transaction budget resets"
+      }
+    ]
+  },
+  "note": "With only 1 add remaining, prioritized immediate free agent over waiver claim that wouldn't process until tomorrow."
 }
 ```
 
@@ -1140,6 +1178,8 @@ The http_request tool handles caching internally. Use appropriate timeout values
 
 ### Prohibited Actions
 - ❌ Recommending moves that violate transaction limits
+- ❌ **Recommending waiver claims when transaction limit is reached or would be exceeded**
+- ❌ **Forgetting that waiver claims count toward weekly add limits**
 - ❌ Overstating confidence levels (leads to bad autonomous execution)
 - ❌ Recommending without clear statistical rationale
 - ❌ Ignoring league-specific scoring settings
