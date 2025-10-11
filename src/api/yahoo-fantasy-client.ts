@@ -1375,10 +1375,31 @@ export class YahooFantasyClient {
       isCommissionerAction?: boolean;
     }
   ): Promise<any> {
-    const xmlData = this.buildEditTeamRosterXML(teamKey, playerChanges, options);
-    // Yahoo API requires PUT method for roster position changes, not POST
-    const response = await this.makeRequest<any>('PUT', `/team/${teamKey}/roster`, xmlData);
-    return response.roster;
+    try {
+      console.error('[editTeamRoster] Building XML with options:', JSON.stringify(options));
+      const xmlData = this.buildEditTeamRosterXML(teamKey, playerChanges, options);
+      console.error('[editTeamRoster] XML built successfully:', xmlData.substring(0, 200));
+      // Yahoo API requires PUT method for roster position changes, not POST
+      const response = await this.makeRequest<any>('PUT', `/team/${teamKey}/roster`, xmlData);
+      console.error('[editTeamRoster] Request successful');
+      console.error('[editTeamRoster] Response type:', typeof response);
+      console.error('[editTeamRoster] Response keys:', response ? Object.keys(response) : 'null');
+      console.error('[editTeamRoster] Response.roster type:', typeof response?.roster);
+      
+      // Return a serializable response
+      const result = {
+        success: true,
+        message: 'Roster updated successfully',
+        roster: response?.roster || response,
+      };
+      
+      console.error('[editTeamRoster] Returning result');
+      return result;
+    } catch (error: any) {
+      console.error('[editTeamRoster] Error:', error?.message || error);
+      console.error('[editTeamRoster] Error stack:', error?.stack);
+      throw error;
+    }
   }
 
   /**

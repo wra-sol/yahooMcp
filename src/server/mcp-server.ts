@@ -59,13 +59,15 @@ export class YahooFantasyMcpServer {
         // Execute the tool
         const result = await this.fantasyTools.executeTool(name, args);
         
-        console.error(`[MCP] Tool '${name}' completed, result size: ${JSON.stringify(result).length} bytes`);
+        // Safely get result size
+        const resultJson = JSON.stringify(result) || 'null';
+        console.error(`[MCP] Tool '${name}' completed, result size: ${resultJson.length} bytes`);
         
         const response = {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(result, null, 2),
+              text: JSON.stringify(result, null, 2) || 'null',
             },
           ],
         };
