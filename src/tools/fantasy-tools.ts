@@ -1322,7 +1322,7 @@ export class FantasyTools {
   private editTeamRosterTool(): Tool {
     return {
       name: 'edit_team_roster',
-      description: 'Edit team roster positions (commissioner only). Directly set player positions on a team\'s roster.',
+      description: 'Edit team roster positions. Set player positions on a team\'s roster to manage your starting lineup, bench, and injured reserve. Move players between positions like QB, RB, WR, BN, IR, etc.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1886,13 +1886,16 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
           return await this.client.getWaiverClaims(args.teamKey);
 
 
-        case 'add_player':
+        case 'add_player': {
+          await this.ensureIrCompliance(args.leagueKey, args.teamKey);
           return await this.client.addPlayer(args.leagueKey, args.teamKey, args.playerKey);
+        }
 
         case 'drop_player':
           return await this.client.dropPlayer(args.leagueKey, args.teamKey, args.playerKey);
 
-        case 'add_drop_players':
+        case 'add_drop_players': {
+          await this.ensureIrCompliance(args.leagueKey, args.teamKey);
           return await this.client.addDropPlayers(
             args.leagueKey,
             args.teamKey,
@@ -1900,6 +1903,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
             args.dropPlayerKey,
             args.faabBid
           );
+        }
 
         case 'propose_trade':
           return await this.client.proposeTrade(
@@ -1936,7 +1940,10 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
         case 'edit_league_settings':
           return await this.client.editLeagueSettings(args.leagueKey, args.settings);
 
-        case 'manage_roster':
+        case 'manage_roster': {
+          if (args.action === 'add' || args.action === 'add_drop') {
+            await this.ensureIrCompliance(args.leagueKey, args.teamKey);
+          }
           return await this.client.manageRoster(
             args.leagueKey,
             args.teamKey,
@@ -1946,6 +1953,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
               dropPlayerKey: args.dropPlayerKey,
             }
           );
+        }
 
         case 'process_transaction':
           return await this.client.processTransaction(
@@ -2299,6 +2307,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     
     // Parse players from roster endpoint (includes lineup positions)
     const players = this.parseTeamPlayers(rosterResult);
+    const irNonCompliantPlayers = this.findIrNonCompliantPlayers(players);
 
     const totalSpots = rosterSummary.total || players.length;
     const availableSpots = Math.max(totalSpots - players.length, 0);
@@ -2320,7 +2329,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
       const lineupPos = player.lineup_position;
       if (lineupPos === 'BN') {
         benchCount++;
-      } else if (lineupPos === 'IR' || lineupPos === 'IR+' || lineupPos === 'IL' || lineupPos === 'IL+') {
+      } else if (this.isIrDesignatedSlot(lineupPos)) {
         irCount++;
       } else if (lineupPos && lineupPos !== 'BN') {
         startersCount++;
@@ -2331,6 +2340,22 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     const teamMatchup = this.findMatchupForTeam(teamKey, teamMatchupsResult.matchups, statCategoryMeta);
     const chosenMatchup = scoreboardMatchup || teamMatchup;
 
+    const irNonCompliantCount = irNonCompliantPlayers.length;
+    const irLabel = irNonCompliantCount === 1 ? 'player' : 'players';
+    const recommendationsActionRequired = irNonCompliantCount > 0 || availableSpots > 0;
+    const recommendationsPriority = irNonCompliantCount > 0
+      ? `Move ${irNonCompliantCount} healthy ${irLabel} out of IR`
+      : availableSpots > 0
+        ? `Fill ${availableSpots} open roster spots`
+        : 'Monitor roster composition';
+    const managerReadyForExecution =
+      irNonCompliantCount > 0
+        ? false
+        : weeklyAddsRemaining !== null
+          ? weeklyAddsRemaining > 0
+          : null;
+    const managerBlockers = irNonCompliantCount > 0 ? ['IR_NON_COMPLIANT'] : [];
+
     // currentWeek was already extracted from leagueMeta above; convert to number for display
     const currentWeekFormatted = Number(currentWeek || chosenMatchup?.week || 0) || null;
 
@@ -2340,6 +2365,12 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     }
     if (!scoreboardResult.matchups.length) {
       errors.push('League scoreboard returned no current matchups.');
+    }
+    if (irNonCompliantPlayers.length) {
+      const offenderNames = irNonCompliantPlayers
+        .map((player) => player.name || player.player_key || 'Unknown player')
+        .join(', ');
+      errors.push(`IR compliance required: move healthy ${irLabel} out of IR slots before making transactions. Offenders: ${offenderNames}.`);
     }
 
     const dataComplete = Boolean(players.length && statCategories.length && scoreboardResult.matchups.length);
@@ -2389,6 +2420,7 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
           bench: benchCount,
           ir: irCount,
         },
+        ir_non_compliant_players: irNonCompliantPlayers,
       },
       current_matchup: {
         week: chosenMatchup?.week ?? currentWeekFormatted,
@@ -2400,15 +2432,17 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
         all_keys_valid: Boolean((leagueMeta.league_key || leagueKey) && (teamMeta.team_key || teamKey)),
         data_complete: dataComplete,
         errors,
+        ir_non_compliant_players: irNonCompliantPlayers,
       },
       for_agent: {
         recommendations_agent: {
-          action_required: availableSpots > 0,
-          priority: availableSpots > 0 ? `Fill ${availableSpots} open roster spots` : 'Monitor roster composition',
+          action_required: recommendationsActionRequired,
+          priority: recommendationsPriority,
         },
         manager_agent: {
           transaction_capacity: weeklyAddsRemaining,
-          ready_for_execution: weeklyAddsRemaining !== null ? weeklyAddsRemaining > 0 : null,
+          ready_for_execution: managerReadyForExecution,
+          blockers: managerBlockers.length ? managerBlockers : undefined,
         },
       },
     };
@@ -2549,18 +2583,199 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
         lineupPosition = selectedPositionRaw.position || selectedPositionRaw.slot || null;
       }
 
+      const status = this.normalizeStatusCode(
+        flattened.status ??
+          flattened.player_status ??
+          flattened.player_status_short ??
+          flattened.fantasy_status
+      );
+      const injuryStatus = this.normalizeStatusCode(
+        flattened.injury_status ??
+          flattened.status ??
+          flattened.player_status ??
+          flattened.roster_status
+      );
+      const statusFull = this.normalizeStatusText(
+        flattened.status_full ??
+          flattened.status_full_text ??
+          flattened.player_status_full ??
+          flattened.injury_status_full
+      );
+      const injuryNote = this.normalizeStatusText(flattened.injury_note ?? flattened.injury_notes);
+      const onDisabledList = this.normalizeBooleanFlag(
+        flattened.on_disabled_list ??
+          flattened.on_disabled ??
+          flattened.disabled_list ??
+          flattened.disabled
+      );
+      const irEligible = this.normalizeBooleanFlag(
+        flattened.ir_eligible ?? flattened.is_ir_eligible ?? flattened.ir_flag
+      );
+
       players.push({
         player_key: flattened.player_key || null,
         name: flattened.name?.full || null,
         position: flattened.display_position || flattened.primary_position || null,
         team: flattened.editorial_team_abbr || flattened.editorial_team_full_name || null,
         lineup_position: lineupPosition,
-        injury_status: flattened.status || flattened.injury_status || null,
+        injury_status: injuryStatus || status,
+        status,
+        status_full: statusFull,
+        injury_note: injuryNote,
+        on_disabled_list: onDisabledList,
+        ir_eligible: irEligible,
         eligibility,
         eligible_positions_to_add: eligibleToAdd,
       });
     }
     return players;
+  }
+
+  private normalizeStatusCode(value: any): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    const str = String(value).trim();
+    if (!str) {
+      return null;
+    }
+    return str.toUpperCase();
+  }
+
+  private normalizeStatusText(value: any): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    const str = String(value).trim();
+    return str || null;
+  }
+
+  private normalizeBooleanFlag(value: any): boolean {
+    if (value === undefined || value === null) {
+      return false;
+    }
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    const str = String(value).trim().toLowerCase();
+    return str === '1' || str === 'true' || str === 'yes' || str === 'y';
+  }
+
+  private isIrDesignatedSlot(position: string | null): boolean {
+    if (!position) {
+      return false;
+    }
+    const normalized = position.trim().toUpperCase();
+    return normalized.startsWith('IR') || normalized.startsWith('IL') || normalized.startsWith('DL');
+  }
+
+  private isPlayerConsideredInjured(player: any): boolean {
+    if (!player) {
+      return false;
+    }
+
+    if (
+      this.normalizeBooleanFlag(player.on_disabled_list) ||
+      this.normalizeBooleanFlag(player.on_injured_list) ||
+      this.normalizeBooleanFlag(player.disabled_list) ||
+      this.normalizeBooleanFlag(player.disabled)
+    ) {
+      return true;
+    }
+
+    const statusCandidates: Array<string | null> = [
+      player.injury_status,
+      player.status,
+      player.status_full,
+      player.injury_note,
+    ];
+
+    const meaningfulTokens = statusCandidates
+      .map((token) => (typeof token === 'string' ? token.trim().toLowerCase() : ''))
+      .filter((token) => token.length > 0);
+
+    if (meaningfulTokens.length === 0) {
+      return false;
+    }
+
+    const nonInjuryTokens = new Set(['active', 'a', 'healthy', 'none', 'ok']);
+    const informativeTokens = meaningfulTokens.filter((token) => !nonInjuryTokens.has(token));
+
+    return informativeTokens.length > 0;
+  }
+
+  private findIrNonCompliantPlayers(players: any[]): Array<{
+    player_key: string | null;
+    name: string | null;
+    lineup_position: string | null;
+    injury_status: string | null;
+    status: string | null;
+    status_full: string | null;
+    injury_note: string | null;
+  }> {
+    const nonCompliant: Array<{
+      player_key: string | null;
+      name: string | null;
+      lineup_position: string | null;
+      injury_status: string | null;
+      status: string | null;
+      status_full: string | null;
+      injury_note: string | null;
+    }> = [];
+
+    for (const player of players) {
+      if (!this.isIrDesignatedSlot(player?.lineup_position || null)) {
+        continue;
+      }
+      if (this.isPlayerConsideredInjured(player)) {
+        continue;
+      }
+      nonCompliant.push({
+        player_key: player.player_key ?? null,
+        name: player.name ?? null,
+        lineup_position: player.lineup_position ?? null,
+        injury_status: player.injury_status ?? null,
+        status: player.status ?? null,
+        status_full: player.status_full ?? null,
+        injury_note: player.injury_note ?? null,
+      });
+    }
+
+    return nonCompliant;
+  }
+
+  private async loadRosterPlayersForCompliance(leagueKey: string, teamKey: string): Promise<any[]> {
+    const leagueSettingsRaw = await this.client.getLeagueSettings(leagueKey);
+    const leagueArray = Array.isArray((leagueSettingsRaw as any)?.league)
+      ? (leagueSettingsRaw as any).league
+      : [];
+    const leagueMeta = leagueArray[0] ?? {};
+    const currentWeek = leagueMeta.current_week;
+    const isDaily = leagueMeta.weekly_deadline === 'intraday';
+    const today = new Date().toISOString().split('T')[0];
+    const rosterParam = isDaily ? `;date=${today}` : currentWeek ? `;week=${currentWeek}` : '';
+    const rosterResult = await this.client['makeRequest']<any>('GET', `/team/${teamKey}/roster${rosterParam}`);
+    return this.parseTeamPlayers(rosterResult);
+  }
+
+  private async ensureIrCompliance(leagueKey: string, teamKey: string): Promise<void> {
+    const players = await this.loadRosterPlayersForCompliance(leagueKey, teamKey);
+    const nonCompliant = this.findIrNonCompliantPlayers(players);
+    if (nonCompliant.length === 0) {
+      return;
+    }
+
+    const offenderSummary = nonCompliant
+      .map((player) => player.name || player.player_key || 'Unknown player')
+      .join(', ');
+    const label = nonCompliant.length === 1 ? 'player' : 'players';
+
+    throw new RosterConstraintError(
+      `IR compliance required: move healthy ${label} out of IR slots before making additional transactions. Offending ${label}: ${offenderSummary}.`,
+      'ir_non_compliant',
+      undefined,
+      nonCompliant[0]?.player_key ?? undefined
+    );
   }
 
   private summarizeFilledPositions(players: Array<{ position: string | null }>): Record<string, number> {

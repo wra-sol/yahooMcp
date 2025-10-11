@@ -465,14 +465,14 @@ export class RateLimitError extends YahooFantasyError {
 export class RosterConstraintError extends YahooFantasyError {
   public readonly position?: string;
   public readonly playerKey?: string;
-  public readonly constraintType?: 'position_filled' | 'invalid_position' | 'roster_limit' | 'other';
+  public readonly constraintType?: 'position_filled' | 'invalid_position' | 'roster_limit' | 'ir_non_compliant' | 'other';
 
   constructor(message: string, constraintType?: string, position?: string, playerKey?: string, yahooError?: YahooApiError) {
     super(message, 'ROSTER_CONSTRAINT', 400, yahooError);
     this.name = 'RosterConstraintError';
     this.position = position;
     this.playerKey = playerKey;
-    this.constraintType = constraintType as any || 'other';
+    this.constraintType = (constraintType as any) || 'other';
     Object.setPrototypeOf(this, RosterConstraintError.prototype);
   }
 
@@ -498,6 +498,8 @@ export class RosterConstraintError extends YahooFantasyError {
         return 'The player is not eligible for the target position. Check the player\'s eligible positions.';
       case 'roster_limit':
         return 'Roster limit reached. You must drop a player before adding another.';
+      case 'ir_non_compliant':
+        return 'Move healthy players out of IR/IR+ slots before attempting additional transactions.';
       default:
         return 'Roster constraint violation. Verify all position requirements and roster limits.';
     }
