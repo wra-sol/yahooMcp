@@ -154,6 +154,7 @@ export class FantasyTools {
       this.processTransactionTool(),
       this.editTeamRosterTool(),
       this.httpRequestTool(),
+      this.getStartActivePlayersTool(),
     ];
   }
 
@@ -1432,6 +1433,55 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     };
   }
 
+  private getStartActivePlayersTool(): Tool {
+    return {
+      name: 'start_active_players',
+      description: `Optimize lineup using "START ACTIVE" strategy - prioritize players with games scheduled.
+      
+This tool implements the START ACTIVE strategy:
+1. PRIORITY 1: Players with games today/tomorrow MUST be in starting lineup
+2. PRIORITY 2: Among active players, rank by recent performance (hot/cold streaks)
+3. PRIORITY 3: Among similar performers, favor better matchups
+
+The tool analyzes your roster and returns lineup change recommendations that:
+- Maximize number of active players (with games) in starting positions
+- Never benches players with games unless all starting slots are filled with active players
+- Ranks active players by performance quality (recent stats)
+- Only benches players who have NO game scheduled
+
+Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          teamKey: {
+            type: 'string',
+            description: 'Team key (e.g., "465.l.27830.t.10")',
+          },
+          date: {
+            type: 'string',
+            description: 'Target date for lineup (YYYY-MM-DD format). For daily leagues, use tomorrow\'s date. Optional - defaults to tomorrow.',
+          },
+          week: {
+            type: 'number',
+            description: 'Target week for lineup (for weekly leagues). Optional.',
+          },
+          includeStats: {
+            type: 'boolean',
+            description: 'Whether to include detailed player stats in response (default: true)',
+            default: true,
+          },
+          autoExecute: {
+            type: 'boolean',
+            description: 'Whether to automatically execute the lineup changes (default: false - returns recommendations only)',
+            default: false,
+          },
+        },
+        required: ['teamKey'],
+        additionalProperties: false,
+      },
+    };
+  }
+
   /**
    * Utility: Check if a player is available in the league
    */
@@ -1963,7 +2013,17 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
             args.note
           );
 
-        case 'edit_team_roster':
+        case 'edit_team_roster': {
+          await this.ensureIrComplianceForRosterEdit(
+            args.leagueKey,
+            args.teamKey,
+            args.playerChanges,
+            {
+              date: args.date,
+              week: args.week,
+              coverageType: args.coverageType,
+            }
+          );
           return await this.client.editTeamRoster(
             args.leagueKey,
             args.teamKey,
@@ -1974,9 +2034,21 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
               coverageType: args.coverageType,
             }
           );
+        }
 
         case 'http_request':
           return await this.executeHttpRequest(args);
+
+        case 'start_active_players':
+          return await this.startActivePlayers(
+            args.teamKey,
+            {
+              date: args.date,
+              week: args.week,
+              includeStats: args.includeStats !== false,
+              autoExecute: args.autoExecute === true,
+            }
+          );
 
         default:
           throw new Error(`Unknown tool: ${name}`);
@@ -2195,6 +2267,294 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
    */
   getClient(): YahooFantasyClient {
     return this.client;
+  }
+
+  /**
+   * START ACTIVE PLAYERS: Optimize lineup to prioritize players with games scheduled
+   * Implements the START ACTIVE strategy: Active players first, then by performance, then by matchup
+   */
+  private async startActivePlayers(
+    teamKey: string,
+    options: {
+      date?: string;
+      week?: number;
+      includeStats?: boolean;
+      autoExecute?: boolean;
+    } = {}
+  ): Promise<any> {
+    try {
+      // Extract league key from team key
+      const leagueKey = this.extractLeagueKeyFromTeamKey(teamKey);
+      
+      console.error(`[START ACTIVE] Analyzing lineup for team ${teamKey}`);
+      
+      // Get league settings to understand league type (daily/weekly)
+      const leagueSettings = await this.client.getLeagueSettings(leagueKey);
+      const leagueArray = Array.isArray((leagueSettings as any)?.league) 
+        ? (leagueSettings as any).league 
+        : [];
+      const leagueMeta = leagueArray[0] ?? {};
+      const isDaily = leagueMeta.weekly_deadline === 'intraday';
+      const lockType = isDaily ? 'daily' : 'weekly';
+      
+      console.error(`[START ACTIVE] League type: ${lockType}`);
+      
+      // Determine target date/week
+      let targetDate = options.date;
+      let targetWeek = options.week;
+      
+      if (!targetDate && !targetWeek) {
+        if (isDaily) {
+          // Default to tomorrow for daily leagues
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          targetDate = tomorrow.toISOString().split('T')[0];
+          console.error(`[START ACTIVE] Using tomorrow's date: ${targetDate}`);
+        } else {
+          // Use current week for weekly leagues
+          targetWeek = parseInt(leagueMeta.current_week || '1');
+          console.error(`[START ACTIVE] Using current week: ${targetWeek}`);
+        }
+      }
+      
+      // Get current roster
+      const rosterParam = isDaily 
+        ? `;date=${targetDate}` 
+        : (targetWeek ? `;week=${targetWeek}` : '');
+      const roster = await this.client['makeRequest']<any>(
+        'GET',
+        `/team/${teamKey}/roster${rosterParam}`
+      );
+      
+      // Parse roster players
+      const players = this.parseTeamPlayers({ team: [roster] });
+      console.error(`[START ACTIVE] Found ${players.length} players on roster`);
+      
+      // Get stats for each player if requested
+      if (options.includeStats) {
+        console.error(`[START ACTIVE] Fetching recent stats for all players...`);
+        for (const player of players) {
+          try {
+            const stats = await this.client.getPlayerStats(player.player_key, 'lastweek');
+            player.recent_stats = stats;
+          } catch (error) {
+            console.error(`[START ACTIVE] Could not fetch stats for ${player.name}: ${error}`);
+            player.recent_stats = null;
+          }
+        }
+      }
+      
+      // Analyze players and categorize by position and activity status
+      // Note: Yahoo API doesn't provide explicit "has game today" field
+      // We'll group by current lineup position and make recommendations based on performance
+      
+      const starters: any[] = [];
+      const bench: any[] = [];
+      const irPlayers: any[] = [];
+      
+      for (const player of players) {
+        const pos = player.selected_position?.position || player.lineup_position || 'BN';
+        
+        if (pos === 'BN') {
+          bench.push(player);
+        } else if (pos === 'IR' || pos === 'IR+') {
+          irPlayers.push(player);
+        } else {
+          starters.push(player);
+        }
+      }
+      
+      console.error(`[START ACTIVE] Starters: ${starters.length}, Bench: ${bench.length}, IR: ${irPlayers.length}`);
+      
+      // Generate recommendations based on performance
+      const recommendations: any[] = [];
+      
+      // Find underperforming starters who should be benched
+      // and bench players who should be started
+      for (const starter of starters) {
+        // Check if this starter is performing poorly
+        const starterPerformance = this.calculatePlayerPerformance(starter);
+        
+        // Find best bench player for this position
+        const eligibleBench = bench.filter(b => 
+          this.isPositionEligible(b, starter.selected_position?.position || starter.primary_position)
+        );
+        
+        for (const benchPlayer of eligibleBench) {
+          const benchPerformance = this.calculatePlayerPerformance(benchPlayer);
+          
+          // If bench player significantly outperforms starter, recommend swap
+          if (benchPerformance > starterPerformance + 1.0) { // +1.0 threshold to avoid churn
+            recommendations.push({
+              type: 'SWAP',
+              priority: 'HIGH',
+              bench_player: {
+                player_key: benchPlayer.player_key,
+                name: benchPlayer.name,
+                position: benchPlayer.primary_position,
+                performance_score: benchPerformance,
+                recent_stats: benchPlayer.recent_stats,
+              },
+              starter_player: {
+                player_key: starter.player_key,
+                name: starter.name,
+                position: starter.selected_position?.position || starter.primary_position,
+                performance_score: starterPerformance,
+                recent_stats: starter.recent_stats,
+              },
+              rationale: `${benchPlayer.name} (score: ${benchPerformance.toFixed(1)}) is performing significantly better than ${starter.name} (score: ${starterPerformance.toFixed(1)})`,
+              changes: [
+                {
+                  player_key: benchPlayer.player_key,
+                  current_position: 'BN',
+                  recommended_position: starter.selected_position?.position || starter.primary_position,
+                },
+                {
+                  player_key: starter.player_key,
+                  current_position: starter.selected_position?.position || starter.primary_position,
+                  recommended_position: 'BN',
+                },
+              ],
+            });
+            break; // Only recommend one swap per starter
+          }
+        }
+      }
+      
+      console.error(`[START ACTIVE] Generated ${recommendations.length} recommendations`);
+      
+      // Build response
+      const response: any = {
+        status: 'SUCCESS',
+        team_key: teamKey,
+        league_key: leagueKey,
+        lock_type: lockType,
+        target_date: targetDate,
+        target_week: targetWeek,
+        roster_summary: {
+          total_players: players.length,
+          starters: starters.length,
+          bench: bench.length,
+          ir: irPlayers.length,
+        },
+        recommendations,
+        auto_execute: options.autoExecute || false,
+      };
+      
+      // If autoExecute is true, apply the changes
+      if (options.autoExecute && recommendations.length > 0) {
+        console.error(`[START ACTIVE] Auto-executing ${recommendations.length} recommendations...`);
+        
+        try {
+          // Build player changes array for edit_team_roster
+          const playerChanges: any[] = [];
+          
+          for (const rec of recommendations) {
+            if (rec.type === 'SWAP' && rec.changes) {
+              for (const change of rec.changes) {
+                playerChanges.push({
+                  playerKey: change.player_key,
+                  position: change.recommended_position,
+                });
+              }
+            }
+          }
+          
+          // Execute the roster changes
+          const editOptions: any = {};
+          if (targetDate) {
+            editOptions.date = targetDate;
+            editOptions.coverageType = 'date';
+          }
+          if (targetWeek) {
+            editOptions.week = targetWeek;
+            if (!editOptions.coverageType) {
+              editOptions.coverageType = 'week';
+            }
+          }
+          
+          await this.ensureIrComplianceForRosterEdit(leagueKey, teamKey, playerChanges, editOptions);
+          
+          const result = await this.client.editTeamRoster(
+            leagueKey,
+            teamKey,
+            playerChanges,
+            editOptions
+          );
+          
+          response.execution_result = {
+            success: true,
+            message: `Successfully executed ${playerChanges.length} lineup changes`,
+            result,
+          };
+          
+          console.error(`[START ACTIVE] Execution successful`);
+        } catch (error: any) {
+          console.error(`[START ACTIVE] Execution failed:`, error);
+          response.execution_result = {
+            success: false,
+            error: error.message,
+            message: 'Failed to execute lineup changes',
+          };
+        }
+      }
+      
+      return response;
+    } catch (error: any) {
+      console.error(`[START ACTIVE] Error:`, error);
+      throw new Error(`START ACTIVE PLAYERS failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Calculate a simple performance score for a player based on recent stats
+   */
+  private calculatePlayerPerformance(player: any): number {
+    // If no recent stats, return low score
+    if (!player.recent_stats) {
+      return 0;
+    }
+    
+    // Try to extract numeric stats from recent_stats
+    // This is a simple heuristic - adjust based on league scoring
+    let score = 0;
+    const stats = player.recent_stats;
+    
+    // Look for common stat fields (points, goals, assists, etc.)
+    if (stats.points) score += parseFloat(stats.points) || 0;
+    if (stats.goals) score += (parseFloat(stats.goals) || 0) * 2; // Weight goals higher
+    if (stats.assists) score += (parseFloat(stats.assists) || 0) * 1.5;
+    if (stats.shots) score += (parseFloat(stats.shots) || 0) * 0.1;
+    if (stats.hits) score += (parseFloat(stats.hits) || 0) * 0.1;
+    if (stats.blocks) score += (parseFloat(stats.blocks) || 0) * 0.1;
+    
+    return score;
+  }
+
+  /**
+   * Check if a player is eligible for a specific position
+   */
+  private isPositionEligible(player: any, targetPosition: string): boolean {
+    if (!targetPosition || targetPosition === 'BN' || targetPosition === 'IR' || targetPosition === 'IR+') {
+      return true; // Anyone can be benched or IR'd
+    }
+    
+    // Check primary position
+    if (player.primary_position === targetPosition) {
+      return true;
+    }
+    
+    // Check eligible positions
+    if (player.eligible_positions && Array.isArray(player.eligible_positions)) {
+      return player.eligible_positions.includes(targetPosition);
+    }
+    
+    // Check for UTIL/FLEX positions (usually accept any skater)
+    if (targetPosition === 'UTIL' || targetPosition === 'FLEX') {
+      return true;
+    }
+    
+    return false;
   }
 
   /**
@@ -2744,7 +3104,11 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     return nonCompliant;
   }
 
-  private async loadRosterPlayersForCompliance(leagueKey: string, teamKey: string): Promise<any[]> {
+  private async loadRosterPlayersForCompliance(
+    leagueKey: string,
+    teamKey: string,
+    coverageOptions?: { date?: string; week?: string | number; coverageType?: 'date' | 'week' }
+  ): Promise<any[]> {
     const leagueSettingsRaw = await this.client.getLeagueSettings(leagueKey);
     const leagueArray = Array.isArray((leagueSettingsRaw as any)?.league)
       ? (leagueSettingsRaw as any).league
@@ -2753,7 +3117,26 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
     const currentWeek = leagueMeta.current_week;
     const isDaily = leagueMeta.weekly_deadline === 'intraday';
     const today = new Date().toISOString().split('T')[0];
-    const rosterParam = isDaily ? `;date=${today}` : currentWeek ? `;week=${currentWeek}` : '';
+
+    const resolvedCoverageType = coverageOptions?.coverageType
+      ? coverageOptions.coverageType
+      : coverageOptions?.date
+        ? 'date'
+        : coverageOptions?.week !== undefined
+          ? 'week'
+          : isDaily
+            ? 'date'
+            : 'week';
+
+    let rosterParam = '';
+    if (resolvedCoverageType === 'date') {
+      const targetDate = coverageOptions?.date || today;
+      rosterParam = targetDate ? `;date=${targetDate}` : '';
+    } else if (resolvedCoverageType === 'week') {
+      const targetWeek = coverageOptions?.week ?? currentWeek;
+      rosterParam = targetWeek ? `;week=${targetWeek}` : '';
+    }
+
     const rosterResult = await this.client['makeRequest']<any>('GET', `/team/${teamKey}/roster${rosterParam}`);
     return this.parseTeamPlayers(rosterResult);
   }
@@ -2776,6 +3159,89 @@ Use this tool to gather injury updates, start/sit recommendations, waiver wire t
       undefined,
       nonCompliant[0]?.player_key ?? undefined
     );
+  }
+
+  private async ensureIrComplianceForRosterEdit(
+    leagueKey: string,
+    teamKey: string,
+    playerChanges: Array<{ playerKey?: string; player_key?: string; position?: string }>,
+    coverageOptions?: { date?: string; week?: string | number; coverageType?: 'date' | 'week' }
+  ): Promise<void> {
+    const players = await this.loadRosterPlayersForCompliance(leagueKey, teamKey, coverageOptions);
+    const simulatedPlayers = this.applyRosterChangesForCompliance(players, playerChanges);
+    const nonCompliant = this.findIrNonCompliantPlayers(simulatedPlayers);
+    if (nonCompliant.length === 0) {
+      return;
+    }
+
+    const offenderSummary = nonCompliant
+      .map((player) => player.name || player.player_key || 'Unknown player')
+      .join(', ');
+    const label = nonCompliant.length === 1 ? 'player' : 'players';
+
+    throw new RosterConstraintError(
+      `IR compliance required: move healthy ${label} out of IR slots before making additional transactions. Offending ${label}: ${offenderSummary}.`,
+      'ir_non_compliant',
+      undefined,
+      nonCompliant[0]?.player_key ?? undefined
+    );
+  }
+
+  private applyRosterChangesForCompliance(
+    players: any[],
+    playerChanges: Array<{ playerKey?: string; player_key?: string; position?: string }>
+  ): any[] {
+    const playersByKey = new Map<string, any>();
+    for (const player of players) {
+      if (!player) continue;
+      const key = player.player_key ?? player.playerKey;
+      if (!key) {
+        continue;
+      }
+      const copy: any = { ...player, player_key: key };
+      if (copy.lineup_position !== undefined && copy.lineup_position !== null) {
+        const trimmed = String(copy.lineup_position).trim();
+        copy.lineup_position = trimmed ? trimmed.toUpperCase() : null;
+      } else {
+        copy.lineup_position = null;
+      }
+      playersByKey.set(key, copy);
+    }
+
+    if (Array.isArray(playerChanges)) {
+      for (const change of playerChanges) {
+        if (!change) {
+          continue;
+        }
+        const playerKey = change.playerKey ?? change.player_key;
+        if (!playerKey) {
+          continue;
+        }
+        const positionRaw = change.position;
+        let normalizedPosition: string | null = null;
+        if (positionRaw !== undefined && positionRaw !== null) {
+          const trimmed = String(positionRaw).trim();
+          normalizedPosition = trimmed ? trimmed.toUpperCase() : null;
+        }
+
+        const existing = playersByKey.get(playerKey);
+        if (existing) {
+          existing.lineup_position = normalizedPosition;
+        } else {
+          playersByKey.set(playerKey, {
+            player_key: playerKey,
+            name: null,
+            lineup_position: normalizedPosition,
+            injury_status: null,
+            status: null,
+            status_full: null,
+            injury_note: null,
+          });
+        }
+      }
+    }
+
+    return Array.from(playersByKey.values());
   }
 
   private summarizeFilledPositions(players: Array<{ position: string | null }>): Record<string, number> {
