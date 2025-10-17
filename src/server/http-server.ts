@@ -68,6 +68,11 @@ export class HttpOAuthServer {
       return this.handleHealthCheck();
     }
 
+    // Route: MCP-UI Demo page
+    if (pathname === '/mcp-ui-demo' && req.method === 'GET') {
+      return this.handleMcpUIDemo();
+    }
+
     // Route: MCP SSE endpoint (official MCP SDK transport)
     if (pathname === '/mcp' && req.method === 'GET') {
       return this.handleMcpSseEndpoint(req);
@@ -76,6 +81,22 @@ export class HttpOAuthServer {
     // Route: MCP message endpoint (official MCP SDK transport)
     if (pathname === '/mcp/messages' && req.method === 'POST') {
       return this.handleMcpMessage(req);
+    }
+
+    // Route: MCP-UI resources endpoint
+    if (pathname === '/mcp-ui/resources' && req.method === 'GET') {
+      return this.handleMcpUIResources();
+    }
+
+    // Route: MCP-UI component endpoint
+    if (pathname.startsWith('/mcp-ui/component/') && req.method === 'GET') {
+      const componentId = pathname.split('/').pop();
+      return this.handleMcpUIComponent(componentId);
+    }
+
+    // Route: MCP-UI action endpoint
+    if (pathname === '/mcp-ui/action' && req.method === 'POST') {
+      return this.handleMcpUIAction(req);
     }
 
     // 404 Not Found
@@ -181,6 +202,19 @@ OAUTH_CALLBACK_URL=${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.
             <h2>MCP Server Status</h2>
             <p>The MCP server is running and ready to accept tool calls via stdio.</p>
             
+            ${hasTokens ? `
+              <div style="background: #e7f3ff; border: 1px solid #b3d9ff; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                <h3 style="margin-top: 0; color: #0066cc;">🎨 Try the Interactive UI Demo!</h3>
+                <p>Experience the power of MCP-UI with our interactive fantasy sports components:</p>
+                <a href="/mcp-ui-demo" class="button" style="background: #0066cc; color: white; text-decoration: none; display: inline-block; padding: 12px 24px; border-radius: 6px; font-weight: 500;">
+                  🚀 Launch MCP-UI Demo
+                </a>
+                <p style="margin-bottom: 0; font-size: 14px; color: #666;">
+                  Interactive forms, real-time data, and dynamic UI components powered by MCP-UI
+                </p>
+              </div>
+            ` : ''}
+            
             <h2>API Endpoints</h2>
             <ul>
               <li><code>GET /</code> - This page</li>
@@ -191,6 +225,14 @@ OAUTH_CALLBACK_URL=${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.
                 <ul>
                   <li><code>GET /mcp</code> - SSE transport endpoint</li>
                   <li><code>POST /mcp/messages?sessionId=...</code> - Message endpoint</li>
+                </ul>
+              </li>
+              <li><strong>MCP-UI (Interactive Components):</strong>
+                <ul>
+                  <li><code>GET /mcp-ui-demo</code> - Interactive UI demo</li>
+                  <li><code>GET /mcp-ui/resources</code> - UI resources</li>
+                  <li><code>GET /mcp-ui/component/{id}</code> - Specific component</li>
+                  <li><code>POST /mcp-ui/action</code> - Execute UI actions</li>
                 </ul>
               </li>
             </ul>
@@ -808,6 +850,110 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
 
   getCredentials(): OAuthCredentials {
     return this.credentials;
+  }
+
+  /**
+   * Handle MCP-UI resources endpoint
+   */
+  private handleMcpUIResources(): Response {
+    if (!this.mcpServer) {
+      return new Response('MCP Server not available', { status: 503 });
+    }
+
+    try {
+      const uiResources = this.mcpServer.getUIResources();
+      return new Response(JSON.stringify(uiResources), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    } catch (error: any) {
+      return new Response(`Error getting UI resources: ${error.message}`, { status: 500 });
+    }
+  }
+
+  /**
+   * Handle MCP-UI component endpoint
+   */
+  private handleMcpUIComponent(componentId?: string): Response {
+    if (!this.mcpServer) {
+      return new Response('MCP Server not available', { status: 503 });
+    }
+
+    if (!componentId) {
+      return new Response('Component ID required', { status: 400 });
+    }
+
+    try {
+      const uiResources = this.mcpServer.getUIResources();
+      const component = uiResources.find((resource: any) => resource.id === componentId);
+      
+      if (!component) {
+        return new Response('Component not found', { status: 404 });
+      }
+
+      return new Response(JSON.stringify(component), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    } catch (error: any) {
+      return new Response(`Error getting component: ${error.message}`, { status: 500 });
+    }
+  }
+
+  /**
+   * Handle MCP-UI action endpoint
+   */
+  private async handleMcpUIAction(req: Request): Promise<Response> {
+    if (!this.mcpServer) {
+      return new Response('MCP Server not available', { status: 503 });
+    }
+
+    try {
+      const body = await req.json();
+      const { action, parameters } = body;
+
+      if (!action) {
+        return new Response('Action required', { status: 400 });
+      }
+
+      // Execute the action using the fantasy tools
+      const fantasyTools = this.mcpServer.getMcpUIServer().getFantasyTools();
+      const result = await fantasyTools.executeTool(action, parameters || {});
+
+      return new Response(JSON.stringify(result), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    } catch (error: any) {
+      return new Response(`Error executing action: ${error.message}`, { status: 500 });
+    }
+  }
+
+  /**
+   * Handle MCP-UI demo page
+   */
+  private handleMcpUIDemo(): Response {
+    const fs = require('fs');
+    const path = require('path');
+    
+    try {
+      const demoPath = path.join(__dirname, '../client/mcp-ui-demo.html');
+      const html = fs.readFileSync(demoPath, 'utf8');
+      
+      return new Response(html, {
+        headers: {
+          'Content-Type': 'text/html',
+        },
+      });
+    } catch (error: any) {
+      return new Response(`Error loading demo page: ${error.message}`, { status: 500 });
+    }
   }
 
   async start(): Promise<void> {

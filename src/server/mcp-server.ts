@@ -7,10 +7,12 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { FantasyTools } from '../tools/fantasy-tools.js';
 import { OAuthCredentials } from '../types/index.js';
+import { YahooFantasyMcpUIServer } from './mcp-ui-server.js';
 
 export class YahooFantasyMcpServer {
   private server: McpServer;
   private fantasyTools: FantasyTools;
+  private mcpUIServer: YahooFantasyMcpUIServer;
   private credentials: OAuthCredentials;
   private tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>;
   private transport?: StdioServerTransport;
@@ -19,6 +21,7 @@ export class YahooFantasyMcpServer {
     this.credentials = credentials;
     this.tokenSaveCallback = tokenSaveCallback;
     this.fantasyTools = new FantasyTools(credentials, tokenSaveCallback);
+    this.mcpUIServer = new YahooFantasyMcpUIServer(credentials, tokenSaveCallback);
     
     this.server = new McpServer(
       {
@@ -94,6 +97,7 @@ export class YahooFantasyMcpServer {
   updateCredentials(credentials: Partial<OAuthCredentials>): void {
     this.credentials = { ...this.credentials, ...credentials };
     this.fantasyTools.updateCredentials(credentials);
+    this.mcpUIServer.updateCredentials(credentials);
   }
 
   /**
@@ -117,5 +121,19 @@ export class YahooFantasyMcpServer {
    */
   getTransport(): StdioServerTransport | undefined {
     return this.transport;
+  }
+
+  /**
+   * Get MCP-UI server instance
+   */
+  getMcpUIServer(): YahooFantasyMcpUIServer {
+    return this.mcpUIServer;
+  }
+
+  /**
+   * Get UI resources
+   */
+  getUIResources() {
+    return this.mcpUIServer.createFantasyUIResources();
   }
 }

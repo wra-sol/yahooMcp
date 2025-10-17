@@ -1,5 +1,6 @@
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { createUIResource } from '@mcp-ui/server';
 import { YahooFantasyClient } from '../api/yahoo-fantasy-client.js';
 import { 
   OAuthCredentials,
@@ -155,6 +156,13 @@ export class FantasyTools {
       this.editTeamRosterTool(),
       this.httpRequestTool(),
       this.getStartActivePlayersTool(),
+      // MCP-UI Tools
+      this.getLeagueStandingsUITool(),
+      this.getTeamRosterUITool(),
+      this.getFreeAgentsUITool(),
+      this.getLineupOptimizationUITool(),
+      this.getPlayerSearchUITool(),
+      this.getMatchupUITool(),
     ];
   }
 
@@ -2050,6 +2058,25 @@ Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
             }
           );
 
+        // MCP-UI Tools
+        case 'get_league_standings_ui':
+          return this.createLeagueStandingsUI(args.leagueKey);
+
+        case 'get_team_roster_ui':
+          return this.createTeamRosterUI(args.teamKey);
+
+        case 'get_free_agents_ui':
+          return this.createFreeAgentsUI(args.leagueKey, args.position);
+
+        case 'get_lineup_optimization_ui':
+          return this.createLineupOptimizationUI(args.teamKey, args.optimizationType);
+
+        case 'get_player_search_ui':
+          return this.createPlayerSearchUI(args.leagueKey, args.playerName, args.position);
+
+        case 'get_matchup_ui':
+          return this.createMatchupUI(args.teamKey, args.week);
+
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
@@ -3838,6 +3865,407 @@ Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
     }
 
     return null;
+  }
+
+  // MCP-UI Creation Methods
+  private createLeagueStandingsUI(leagueKey: string) {
+    return createUIResource({
+      uri: `ui://league-standings-${leagueKey}`,
+      content: {
+        type: 'rawHtml',
+        htmlString: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px;">
+            <h2 style="color: #333; margin-bottom: 20px;">📊 League Standings</h2>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+              <strong>League:</strong> ${leagueKey}
+            </div>
+            <div id="standings-content" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #666;">
+              <div>Loading standings...</div>
+            </div>
+          </div>
+          <script>
+            (async () => {
+              try {
+                const response = await fetch('/mcp-ui/action', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ 
+                    action: 'get_league_standings', 
+                    parameters: { leagueKey: '${leagueKey}' } 
+                  })
+                });
+                
+                if (!response.ok) throw new Error('Failed to load standings');
+                const data = await response.json();
+                
+                const content = document.getElementById('standings-content');
+                content.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(data, null, 2) + '</pre>';
+              } catch (error) {
+                document.getElementById('standings-content').innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+              }
+            })();
+          </script>
+        `
+      },
+      encoding: 'text'
+    });
+  }
+
+  private createTeamRosterUI(teamKey: string) {
+    return createUIResource({
+      uri: `ui://team-roster-${teamKey}`,
+      content: {
+        type: 'rawHtml',
+        htmlString: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px;">
+            <h2 style="color: #333; margin-bottom: 20px;">👥 Team Roster</h2>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+              <strong>Team:</strong> ${teamKey}
+            </div>
+            <div id="roster-content" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #666;">
+              <div>Loading roster...</div>
+            </div>
+          </div>
+          <script>
+            (async () => {
+              try {
+                const response = await fetch('/mcp-ui/action', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ 
+                    action: 'get_team_roster', 
+                    parameters: { teamKey: '${teamKey}' } 
+                  })
+                });
+                
+                if (!response.ok) throw new Error('Failed to load roster');
+                const data = await response.json();
+                
+                const content = document.getElementById('roster-content');
+                content.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(data, null, 2) + '</pre>';
+              } catch (error) {
+                document.getElementById('roster-content').innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+              }
+            })();
+          </script>
+        `
+      },
+      encoding: 'text'
+    });
+  }
+
+  private createFreeAgentsUI(leagueKey: string, position?: string) {
+    return createUIResource({
+      uri: `ui://free-agents-${leagueKey}`,
+      content: {
+        type: 'rawHtml',
+        htmlString: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px;">
+            <h2 style="color: #333; margin-bottom: 20px;">🆓 Free Agents</h2>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+              <strong>League:</strong> ${leagueKey}${position ? `<br><strong>Position:</strong> ${position}` : ''}
+            </div>
+            <div id="free-agents-content" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #666;">
+              <div>Loading free agents...</div>
+            </div>
+          </div>
+          <script>
+            (async () => {
+              try {
+                const parameters = { leagueKey: '${leagueKey}' };
+                ${position ? `parameters.position = '${position}';` : ''}
+                
+                const response = await fetch('/mcp-ui/action', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ 
+                    action: 'get_free_agents', 
+                    parameters: parameters 
+                  })
+                });
+                
+                if (!response.ok) throw new Error('Failed to load free agents');
+                const data = await response.json();
+                
+                const content = document.getElementById('free-agents-content');
+                content.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(data, null, 2) + '</pre>';
+              } catch (error) {
+                document.getElementById('free-agents-content').innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+              }
+            })();
+          </script>
+        `
+      },
+      encoding: 'text'
+    });
+  }
+
+  private createLineupOptimizationUI(teamKey: string, optimizationType?: string) {
+    return createUIResource({
+      uri: `ui://lineup-optimization-${teamKey}`,
+      content: {
+        type: 'rawHtml',
+        htmlString: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px;">
+            <h2 style="color: #333; margin-bottom: 20px;">⚡ Lineup Optimization</h2>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+              <strong>Team:</strong> ${teamKey}${optimizationType ? `<br><strong>Type:</strong> ${optimizationType}` : ''}
+            </div>
+            <div id="optimization-content" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #666;">
+              <div>Optimizing lineup...</div>
+            </div>
+          </div>
+          <script>
+            (async () => {
+              try {
+                const parameters = { teamKey: '${teamKey}' };
+                ${optimizationType ? `parameters.optimizationType = '${optimizationType}';` : ''}
+                
+                const response = await fetch('/mcp-ui/action', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ 
+                    action: 'get_lineup_optimization', 
+                    parameters: parameters 
+                  })
+                });
+                
+                if (!response.ok) throw new Error('Failed to optimize lineup');
+                const data = await response.json();
+                
+                const content = document.getElementById('optimization-content');
+                content.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(data, null, 2) + '</pre>';
+              } catch (error) {
+                document.getElementById('optimization-content').innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+              }
+            })();
+          </script>
+        `
+      },
+      encoding: 'text'
+    });
+  }
+
+  private createPlayerSearchUI(leagueKey: string, playerName?: string, position?: string) {
+    return createUIResource({
+      uri: `ui://player-search-${leagueKey}`,
+      content: {
+        type: 'rawHtml',
+        htmlString: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px;">
+            <h2 style="color: #333; margin-bottom: 20px;">🔍 Player Search</h2>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+              <strong>League:</strong> ${leagueKey}${playerName ? `<br><strong>Player:</strong> ${playerName}` : ''}${position ? `<br><strong>Position:</strong> ${position}` : ''}
+            </div>
+            <div id="search-content" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #666;">
+              <div>Searching players...</div>
+            </div>
+          </div>
+          <script>
+            (async () => {
+              try {
+                const parameters = { leagueKey: '${leagueKey}' };
+                ${playerName ? `parameters.playerName = '${playerName}';` : ''}
+                ${position ? `parameters.position = '${position}';` : ''}
+                
+                const response = await fetch('/mcp-ui/action', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ 
+                    action: 'search_players', 
+                    parameters: parameters 
+                  })
+                });
+                
+                if (!response.ok) throw new Error('Failed to search players');
+                const data = await response.json();
+                
+                const content = document.getElementById('search-content');
+                content.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(data, null, 2) + '</pre>';
+              } catch (error) {
+                document.getElementById('search-content').innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+              }
+            })();
+          </script>
+        `
+      },
+      encoding: 'text'
+    });
+  }
+
+  private createMatchupUI(teamKey: string, week?: number) {
+    return createUIResource({
+      uri: `ui://matchup-${teamKey}`,
+      content: {
+        type: 'rawHtml',
+        htmlString: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px;">
+            <h2 style="color: #333; margin-bottom: 20px;">⚔️ Team Matchup</h2>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+              <strong>Team:</strong> ${teamKey}${week ? `<br><strong>Week:</strong> ${week}` : ''}
+            </div>
+            <div id="matchup-content" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #666;">
+              <div>Loading matchup...</div>
+            </div>
+          </div>
+          <script>
+            (async () => {
+              try {
+                const parameters = { teamKey: '${teamKey}' };
+                ${week ? `parameters.week = ${week};` : ''}
+                
+                const response = await fetch('/mcp-ui/action', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ 
+                    action: 'get_team_matchup', 
+                    parameters: parameters 
+                  })
+                });
+                
+                if (!response.ok) throw new Error('Failed to load matchup');
+                const data = await response.json();
+                
+                const content = document.getElementById('matchup-content');
+                content.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(data, null, 2) + '</pre>';
+              } catch (error) {
+                document.getElementById('matchup-content').innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+              }
+            })();
+          </script>
+        `
+      },
+      encoding: 'text'
+    });
+  }
+
+  // MCP-UI Tools
+  private getLeagueStandingsUITool(): Tool {
+    return {
+      name: 'get_league_standings_ui',
+      description: 'Get an interactive UI component for viewing league standings',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          leagueKey: {
+            type: 'string',
+            description: 'League key (e.g., "414.l.123456")',
+          },
+        },
+        required: ['leagueKey'],
+        additionalProperties: false,
+      },
+    };
+  }
+
+  private getTeamRosterUITool(): Tool {
+    return {
+      name: 'get_team_roster_ui',
+      description: 'Get an interactive UI component for viewing team roster',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          teamKey: {
+            type: 'string',
+            description: 'Team key (e.g., "414.l.123456.t.1")',
+          },
+        },
+        required: ['teamKey'],
+        additionalProperties: false,
+      },
+    };
+  }
+
+  private getFreeAgentsUITool(): Tool {
+    return {
+      name: 'get_free_agents_ui',
+      description: 'Get an interactive UI component for browsing free agents',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          leagueKey: {
+            type: 'string',
+            description: 'League key (e.g., "414.l.123456")',
+          },
+          position: {
+            type: 'string',
+            description: 'Position filter (e.g., "C", "1B", "OF", "SP", "RP")',
+          },
+        },
+        required: ['leagueKey'],
+        additionalProperties: false,
+      },
+    };
+  }
+
+  private getLineupOptimizationUITool(): Tool {
+    return {
+      name: 'get_lineup_optimization_ui',
+      description: 'Get an interactive UI component for lineup optimization',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          teamKey: {
+            type: 'string',
+            description: 'Team key (e.g., "414.l.123456.t.1")',
+          },
+          optimizationType: {
+            type: 'string',
+            description: 'Optimization type: "projected", "recent", or "season"',
+          },
+        },
+        required: ['teamKey'],
+        additionalProperties: false,
+      },
+    };
+  }
+
+  private getPlayerSearchUITool(): Tool {
+    return {
+      name: 'get_player_search_ui',
+      description: 'Get an interactive UI component for searching players',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          leagueKey: {
+            type: 'string',
+            description: 'League key (e.g., "414.l.123456")',
+          },
+          playerName: {
+            type: 'string',
+            description: 'Player name to search for',
+          },
+          position: {
+            type: 'string',
+            description: 'Position filter (e.g., "C", "1B", "OF", "SP", "RP")',
+          },
+        },
+        required: ['leagueKey'],
+        additionalProperties: false,
+      },
+    };
+  }
+
+  private getMatchupUITool(): Tool {
+    return {
+      name: 'get_matchup_ui',
+      description: 'Get an interactive UI component for viewing team matchups',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          teamKey: {
+            type: 'string',
+            description: 'Team key (e.g., "414.l.123456.t.1")',
+          },
+          week: {
+            type: 'number',
+            description: 'Week number (optional)',
+          },
+        },
+        required: ['teamKey'],
+        additionalProperties: false,
+      },
+    };
   }
 }
 
