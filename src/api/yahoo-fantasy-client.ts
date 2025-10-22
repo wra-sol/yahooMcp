@@ -660,24 +660,51 @@ export class YahooFantasyClient {
    * Get league settings
    */
   async getLeagueSettings(leagueKey: string): Promise<string> {
-    return this.makeRequest<string>('GET', `/league/${leagueKey}/settings`);
+    // Use longer timeout for league settings as it can be slow
+    const originalTimeout = this.requestTimeout;
+    this.requestTimeout = 120000; // 2 minutes for league settings
+    
+    try {
+      return this.makeRequest<string>('GET', `/league/${leagueKey}/settings`);
+    } finally {
+      // Restore original timeout
+      this.requestTimeout = originalTimeout;
+    }
   }
 
   /**
    * Get league metadata
    */
   async getLeagueMetadata(leagueKey: string): Promise<any> {
-    // Yahoo supports metadata via out param or a dedicated subresource
-    // Prefer direct subresource if available
-    return this.makeRequest<any>('GET', `/league/${leagueKey}/metadata`);
+    // Use longer timeout for league metadata as it can be slow
+    const originalTimeout = this.requestTimeout;
+    this.requestTimeout = 90000; // 90 seconds for league metadata
+    
+    try {
+      // Yahoo supports metadata via out param or a dedicated subresource
+      // Prefer direct subresource if available
+      return this.makeRequest<any>('GET', `/league/${leagueKey}/metadata`);
+    } finally {
+      // Restore original timeout
+      this.requestTimeout = originalTimeout;
+    }
   }
 
   /**
    * Get league rosters (all team rosters within a league)
    */
   async getLeagueRosters(leagueKey: string): Promise<string> {
-    const endpoint = `/league/${leagueKey}/teams;out=roster`;
-    return this.makeRequest<string>('GET', endpoint);
+    // Use longer timeout for league rosters as it can be slow
+    const originalTimeout = this.requestTimeout;
+    this.requestTimeout = 90000; // 90 seconds for league rosters
+    
+    try {
+      const endpoint = `/league/${leagueKey}/teams;out=roster`;
+      return this.makeRequest<string>('GET', endpoint);
+    } finally {
+      // Restore original timeout
+      this.requestTimeout = originalTimeout;
+    }
   }
 
   /**
@@ -707,9 +734,18 @@ export class YahooFantasyClient {
    * Get league teams
    */
   async getLeagueTeams(leagueKey: string, filters?: LeagueFilters): Promise<string> {
-    const params = this.buildFilterParams(filters);
-    const endpoint = `/league/${leagueKey}/teams${params}`;
-    return this.makeRequest<string>('GET', endpoint);
+    // Use longer timeout for league teams as it can be slow
+    const originalTimeout = this.requestTimeout;
+    this.requestTimeout = 90000; // 90 seconds for league teams
+    
+    try {
+      const params = this.buildFilterParams(filters);
+      const endpoint = `/league/${leagueKey}/teams${params}`;
+      return this.makeRequest<string>('GET', endpoint);
+    } finally {
+      // Restore original timeout
+      this.requestTimeout = originalTimeout;
+    }
   }
 
   /**
@@ -776,8 +812,8 @@ export class YahooFantasyClient {
    * Get league-wide statistics
    */
   async getLeagueStats(leagueKey: string): Promise<any> {
-    // Get league stats aggregated across all teams
-    return this.makeRequest<any>('GET', `/league/${leagueKey};out=stats`);
+    // Get league stats through standings and teams with stats
+    return this.makeRequest<any>('GET', `/league/${leagueKey};out=standings,teams`);
   }
 
   /**
@@ -898,8 +934,8 @@ export class YahooFantasyClient {
   ): Promise<{ matchups: Matchup[]; count: number }> {
     const weekParam = week ? `;week=${week}` : '';
     const teamKeysParam = teamKeys?.length ? `;team_keys=${teamKeys.join(',')}` : '';
-    // Use scoreboard with teams subresource to get detailed matchup info with rosters and stats
-    const endpoint = `/league/${leagueKey}/scoreboard${weekParam}${teamKeysParam};out=teams,roster,matchups,stats`;
+    // Use scoreboard with teams subresource to get detailed matchup info
+    const endpoint = `/league/${leagueKey}/scoreboard${weekParam}${teamKeysParam};out=teams,matchups`;
     const response = await this.makeRequest<any>('GET', endpoint);
     return {
       matchups: response.scoreboard?.matchups || [],

@@ -210,46 +210,104 @@ export const MCPUIClient: React.FC<MCPUIClientProps> = ({
 
   if (!selectedResource) {
     return (
-      <div style={{ padding: '20px', textAlign: 'center' }}>
-        <p>No UI resources available</p>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        color: 'white'
+      }}>
+        <div style={{ 
+          textAlign: 'center', 
+          padding: '40px',
+          background: 'rgba(255, 255, 255, 0.1)',
+          borderRadius: '16px',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255, 255, 255, 0.2)'
+        }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>🏈</div>
+          <h2 style={{ margin: '0 0 8px 0', fontSize: '24px' }}>No UI Resources Available</h2>
+          <p style={{ margin: '0', opacity: 0.9 }}>Make sure your MCP server is running and providing UI resources.</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Resource selector */}
+    <div style={{ 
+      height: '100vh', 
+      display: 'flex', 
+      flexDirection: 'column',
+      background: '#f8fafc',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    }}>
+      {/* Enhanced Resource selector */}
       {unwrappedResources.length > 1 && (
         <div style={{ 
-          padding: '10px', 
-          borderBottom: '1px solid #ddd', 
-          backgroundColor: '#f8f9fa' 
+          padding: '16px 24px', 
+          borderBottom: '1px solid #e2e8f0', 
+          background: 'white',
+          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
         }}>
-          <select 
-            value={selectedResource?.uri || ''}
-            onChange={(e) => {
-              const resource = unwrappedResources.find(r => r.uri === e.target.value);
-              setSelectedResource(resource || null);
-            }}
-            style={{
-              padding: '8px 12px',
-              border: '1px solid #ddd',
-              borderRadius: '4px',
-              fontSize: '14px',
-              minWidth: '200px'
-            }}
-          >
-            {unwrappedResources.map(resource => (
-              <option key={resource.uri} value={resource.uri}>
-                {getResourceDisplayName(resource.uri)}
-              </option>
-            ))}
-          </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ 
+              fontSize: '20px',
+              color: '#4a5568'
+            }}>🏈</div>
+            <label style={{ 
+              fontSize: '14px', 
+              fontWeight: '600', 
+              color: '#2d3748',
+              marginRight: '8px'
+            }}>
+              Select Tool:
+            </label>
+            <select 
+              value={selectedResource?.uri || ''}
+              onChange={(e) => {
+                const resource = unwrappedResources.find(r => r.uri === e.target.value);
+                setSelectedResource(resource || null);
+              }}
+              style={{
+                padding: '10px 16px',
+                border: '2px solid #e2e8f0',
+                borderRadius: '8px',
+                fontSize: '14px',
+                minWidth: '250px',
+                background: 'white',
+                color: '#2d3748',
+                fontWeight: '500',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                outline: 'none'
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = '#667eea';
+                e.target.style.boxShadow = '0 0 0 3px rgba(102, 126, 234, 0.1)';
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = '#e2e8f0';
+                e.target.style.boxShadow = 'none';
+              }}
+            >
+              {unwrappedResources.map(resource => (
+                <option key={resource.uri} value={resource.uri}>
+                  {getResourceDisplayName(resource.uri)}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
 
       {/* Resource renderer */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div style={{ 
+        flex: 1, 
+        overflow: 'hidden',
+        position: 'relative'
+      }}>
         <UIResourceRenderer 
           resource={selectedResource}
         />

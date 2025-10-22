@@ -41,8 +41,21 @@ export class YahooFantasyMcpServer {
   private setupHandlers(): void {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      const fantasyTools = this.fantasyTools.getTools();
+      const uiTools = [
+        {
+          name: 'get_ui_resources',
+          description: 'Get available UI resources for fantasy sports tools',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+            required: []
+          }
+        }
+      ];
+      
       return {
-        tools: this.fantasyTools.getTools(),
+        tools: [...fantasyTools, ...uiTools],
       };
     });
 
@@ -50,6 +63,31 @@ export class YahooFantasyMcpServer {
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       try {
         const { name, arguments: args } = request.params;
+        
+        // Handle UI resources tool
+        if (name === 'get_ui_resources') {
+          try {
+            const uiResources = this.mcpUIServer.createFantasyUIResources();
+            console.error('[MCP] UI Resources count:', uiResources.length);
+            
+            // Return as text content with JSON representation
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    resources: uiResources,
+                    count: uiResources.length,
+                    message: 'UI resources available. Use individual UI tools to get specific components.'
+                  }, null, 2)
+                }
+              ]
+            };
+          } catch (error) {
+            console.error('[MCP] Error creating UI resources:', error);
+            throw error;
+          }
+        }
         
         // Validate tool name exists
         const availableTools = this.fantasyTools.getTools();
@@ -147,4 +185,5 @@ export class YahooFantasyMcpServer {
   getUIResources() {
     return this.mcpUIServer.createFantasyUIResources();
   }
+
 }

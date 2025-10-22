@@ -75,9 +75,11 @@ interface ParsedStatValue {
 
 export class FantasyTools {
   private client: YahooFantasyClient;
+  private credentials: OAuthCredentials;
 
   constructor(credentials: OAuthCredentials, tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>) {
     OAuthCredentialsSchema.parse(credentials);
+    this.credentials = credentials;
     this.client = new YahooFantasyClient(credentials, tokenSaveCallback);
   }
 
@@ -85,6 +87,7 @@ export class FantasyTools {
    * Update OAuth credentials
    */
   updateCredentials(credentials: Partial<OAuthCredentials>): void {
+    this.credentials = { ...this.credentials, ...credentials };
     this.client.updateCredentials(credentials);
   }
 
@@ -163,6 +166,7 @@ export class FantasyTools {
       this.getLineupOptimizationUITool(),
       this.getPlayerSearchUITool(),
       this.getMatchupUITool(),
+      this.getUIResourcesTool(),
     ];
   }
 
@@ -2077,6 +2081,9 @@ Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
         case 'get_matchup_ui':
           return this.createMatchupUI(args.teamKey, args.week);
 
+        case 'get_ui_resources':
+          return this.createUIResources();
+
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
@@ -3901,6 +3908,9 @@ return createUIResource({
             }
 
             async function executeAction() {
+              if (isExecuting) return;
+              isExecuting = true;
+              
               const resultsDiv = document.getElementById('results');
               resultsDiv.style.display = 'block';
               resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Loading...</div>';
@@ -3926,6 +3936,8 @@ return createUIResource({
                 
               } catch (error) {
                 resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+              } finally {
+                isExecuting = false;
               }
             }
 
@@ -3956,12 +3968,50 @@ return createUIResource({
               }
             });
 
-            // Auto-execute on load
-            setTimeout(executeAction, 100);
+            // Auto-execution with execution guard
+            let isExecuting = false;
+            let hasExecuted = false;
+            
+            function startAutoExecution() {
+              if (hasExecuted) return;
+              
+              // Try immediate execution
+              setTimeout(() => {
+                if (!hasExecuted && !isExecuting) {
+                  executeAction();
+                  hasExecuted = true;
+                }
+              }, 100);
+            }
+            
+            // Start auto-execution when DOM is ready
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', startAutoExecution);
+            } else {
+              startAutoExecution();
+            }
           </script>
         `
       },
-      encoding: 'text'
+      encoding: 'text',
+      metadata: {
+        title: 'League Standings',
+        description: 'View current standings and team rankings for your fantasy league',
+        author: 'Yahoo Fantasy MCP',
+        created: new Date().toISOString(),
+        'mcp-ui': {
+          preferredFrameSize: {
+            width: 600,
+            height: 400
+          },
+          initialRenderData: {
+            leagueKey: leagueKey
+          }
+        },
+        'openai/widgetDescription': 'View current standings and team rankings for your fantasy league',
+        'openai/widgetPrefersBorder': true,
+        'openai/widgetAccessible': true
+      }
     });
   }
 
@@ -3991,6 +4041,9 @@ return createUIResource({
           </div>
           <script>
             async function executeAction() {
+              if (isExecuting) return;
+              isExecuting = true;
+              
               const resultsDiv = document.getElementById('results');
               resultsDiv.style.display = 'block';
               resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Loading...</div>';
@@ -4013,9 +4066,11 @@ return createUIResource({
                   if (event.data.type === 'toolResult' && event.data.requestId === requestId) {
                     resultsDiv.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(event.data.result, null, 2) + '</pre>';
                     window.removeEventListener('message', handleResponse);
+                    isExecuting = false;
                   } else if (event.data.type === 'toolError' && event.data.requestId === requestId) {
                     resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + event.data.error + '</div>';
                     window.removeEventListener('message', handleResponse);
+                    isExecuting = false;
                   }
                 };
                 
@@ -4028,19 +4083,60 @@ return createUIResource({
                   if (resultsDiv.innerHTML.includes('Loading...')) {
                     resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Request timed out after ' + (timeoutMs / 1000) + ' seconds</div>';
                   }
+                  isExecuting = false;
                 }, timeoutMs);
                 
               } catch (error) {
                 resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+              } finally {
+                isExecuting = false;
               }
             }
             
-            // Auto-execute on load
-            setTimeout(executeAction, 100);
+            // Auto-execution with execution guard
+            let isExecuting = false;
+            let hasExecuted = false;
+            
+            function startAutoExecution() {
+              if (hasExecuted) return;
+              
+              // Try immediate execution
+              setTimeout(() => {
+                if (!hasExecuted && !isExecuting) {
+                  executeAction();
+                  hasExecuted = true;
+                }
+              }, 100);
+            }
+            
+            // Start auto-execution when DOM is ready
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', startAutoExecution);
+            } else {
+              startAutoExecution();
+            }
           </script>
         `
       },
-      encoding: 'text'
+      encoding: 'text',
+      metadata: {
+        title: 'Team Roster',
+        description: 'View detailed roster information including player positions, stats, and availability',
+        author: 'Yahoo Fantasy MCP',
+        created: new Date().toISOString(),
+        'mcp-ui': {
+          preferredFrameSize: {
+            width: 600,
+            height: 400
+          },
+          initialRenderData: {
+            teamKey: teamKey
+          }
+        },
+        'openai/widgetDescription': 'View detailed roster information including player positions, stats, and availability',
+        'openai/widgetPrefersBorder': true,
+        'openai/widgetAccessible': true
+      }
     });
   }
 
@@ -4083,6 +4179,9 @@ return createUIResource({
           </div>
           <script>
             async function executeAction() {
+              if (isExecuting) return;
+              isExecuting = true;
+              
               const resultsDiv = document.getElementById('results');
               resultsDiv.style.display = 'block';
               resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Loading...</div>';
@@ -4110,9 +4209,11 @@ return createUIResource({
                   if (event.data.type === 'toolResult' && event.data.requestId === requestId) {
                     resultsDiv.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(event.data.result, null, 2) + '</pre>';
                     window.removeEventListener('message', handleResponse);
+                    isExecuting = false;
                   } else if (event.data.type === 'toolError' && event.data.requestId === requestId) {
                     resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + event.data.error + '</div>';
                     window.removeEventListener('message', handleResponse);
+                    isExecuting = false;
                   }
                 };
                 
@@ -4125,19 +4226,61 @@ return createUIResource({
                   if (resultsDiv.innerHTML.includes('Loading...')) {
                     resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Request timed out after ' + (timeoutMs / 1000) + ' seconds</div>';
                   }
+                  isExecuting = false;
                 }, timeoutMs);
                 
               } catch (error) {
                 resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+              } finally {
+                isExecuting = false;
               }
             }
             
-            // Auto-execute on load
-            setTimeout(executeAction, 100);
+            // Auto-execution with execution guard
+            let isExecuting = false;
+            let hasExecuted = false;
+            
+            function startAutoExecution() {
+              if (hasExecuted) return;
+              
+              // Try immediate execution
+              setTimeout(() => {
+                if (!hasExecuted && !isExecuting) {
+                  executeAction();
+                  hasExecuted = true;
+                }
+              }, 100);
+            }
+            
+            // Start auto-execution when DOM is ready
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', startAutoExecution);
+            } else {
+              startAutoExecution();
+            }
           </script>
         `
       },
-      encoding: 'text'
+      encoding: 'text',
+      metadata: {
+        title: 'Free Agents',
+        description: 'Browse available free agents in your league with optional position filtering',
+        author: 'Yahoo Fantasy MCP',
+        created: new Date().toISOString(),
+        'mcp-ui': {
+          preferredFrameSize: {
+            width: 600,
+            height: 400
+          },
+          initialRenderData: {
+            leagueKey: leagueKey,
+            position: position
+          }
+        },
+        'openai/widgetDescription': 'Browse available free agents in your league with optional position filtering',
+        'openai/widgetPrefersBorder': true,
+        'openai/widgetAccessible': true
+      }
     });
   }
 
@@ -4173,6 +4316,9 @@ return createUIResource({
           </div>
           <script>
             async function executeAction() {
+              if (isExecuting) return;
+              isExecuting = true;
+              
               const resultsDiv = document.getElementById('results');
               resultsDiv.style.display = 'block';
               resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Loading...</div>';
@@ -4198,9 +4344,11 @@ return createUIResource({
                   if (event.data.type === 'toolResult' && event.data.requestId === requestId) {
                     resultsDiv.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(event.data.result, null, 2) + '</pre>';
                     window.removeEventListener('message', handleResponse);
+                    isExecuting = false;
                   } else if (event.data.type === 'toolError' && event.data.requestId === requestId) {
                     resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + event.data.error + '</div>';
                     window.removeEventListener('message', handleResponse);
+                    isExecuting = false;
                   }
                 };
                 
@@ -4213,19 +4361,61 @@ return createUIResource({
                   if (resultsDiv.innerHTML.includes('Loading...')) {
                     resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Request timed out after ' + (timeoutMs / 1000) + ' seconds</div>';
                   }
+                  isExecuting = false;
                 }, timeoutMs);
                 
               } catch (error) {
                 resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+              } finally {
+                isExecuting = false;
               }
             }
             
-            // Auto-execute on load
-            setTimeout(executeAction, 100);
+            // Auto-execution with execution guard
+            let isExecuting = false;
+            let hasExecuted = false;
+            
+            function startAutoExecution() {
+              if (hasExecuted) return;
+              
+              // Try immediate execution
+              setTimeout(() => {
+                if (!hasExecuted && !isExecuting) {
+                  executeAction();
+                  hasExecuted = true;
+                }
+              }, 100);
+            }
+            
+            // Start auto-execution when DOM is ready
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', startAutoExecution);
+            } else {
+              startAutoExecution();
+            }
           </script>
         `
       },
-      encoding: 'text'
+      encoding: 'text',
+      metadata: {
+        title: 'Lineup Optimization',
+        description: 'Get AI-powered lineup recommendations based on projected points, recent performance, or season averages',
+        author: 'Yahoo Fantasy MCP',
+        created: new Date().toISOString(),
+        'mcp-ui': {
+          preferredFrameSize: {
+            width: 600,
+            height: 400
+          },
+          initialRenderData: {
+            teamKey: teamKey,
+            optimizationType: optimizationType
+          }
+        },
+        'openai/widgetDescription': 'Get AI-powered lineup recommendations based on projected points, recent performance, or season averages',
+        'openai/widgetPrefersBorder': true,
+        'openai/widgetAccessible': true
+      }
     });
   }
 
@@ -4271,6 +4461,9 @@ return createUIResource({
           </div>
           <script>
             async function executeAction() {
+              if (isExecuting) return;
+              isExecuting = true;
+              
               const resultsDiv = document.getElementById('results');
               resultsDiv.style.display = 'block';
               resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Loading...</div>';
@@ -4301,9 +4494,11 @@ return createUIResource({
                   if (event.data.type === 'toolResult' && event.data.requestId === requestId) {
                     resultsDiv.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(event.data.result, null, 2) + '</pre>';
                     window.removeEventListener('message', handleResponse);
+                    isExecuting = false;
                   } else if (event.data.type === 'toolError' && event.data.requestId === requestId) {
                     resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + event.data.error + '</div>';
                     window.removeEventListener('message', handleResponse);
+                    isExecuting = false;
                   }
                 };
                 
@@ -4316,18 +4511,45 @@ return createUIResource({
                   if (resultsDiv.innerHTML.includes('Loading...')) {
                     resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Request timed out after ' + (timeoutMs / 1000) + ' seconds</div>';
                   }
+                  isExecuting = false;
                 }, timeoutMs);
                 
               } catch (error) {
                 resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+              } finally {
+                isExecuting = false;
               }
             }
             
-            // Don't auto-execute on load for search (user needs to input search terms)
+            // Auto-execute if we have pre-filled search terms
+            const nameInput = document.getElementById('name');
+            if (nameInput && nameInput.value.trim()) {
+              setTimeout(executeAction, 100);
+            }
           </script>
         `
       },
-      encoding: 'text'
+      encoding: 'text',
+      metadata: {
+        title: 'Player Search',
+        description: 'Search for specific players in your league with advanced filtering options',
+        author: 'Yahoo Fantasy MCP',
+        created: new Date().toISOString(),
+        'mcp-ui': {
+          preferredFrameSize: {
+            width: 600,
+            height: 400
+          },
+          initialRenderData: {
+            leagueKey: leagueKey,
+            playerName: playerName,
+            position: position
+          }
+        },
+        'openai/widgetDescription': 'Search for specific players in your league with advanced filtering options',
+        'openai/widgetPrefersBorder': true,
+        'openai/widgetAccessible': true
+      }
     });
   }
 
@@ -4352,14 +4574,20 @@ return createUIResource({
               ${formFields}
             </div>
             <button onclick="executeAction()" 
-                    style="background-color: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                    style="background-color: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; width: 100%; margin-bottom: 10px;">
               Get Matchup
             </button>
+            <div id="auto-loading" style="text-align: center; color: #666; font-style: italic; font-size: 12px; margin-bottom: 10px;">
+              Auto-loading data...
+            </div>
             <div id="results" style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; border: 1px solid #e9ecef; display: none;">
             </div>
           </div>
           <script>
             async function executeAction() {
+              if (isExecuting) return;
+              isExecuting = true;
+              
               const resultsDiv = document.getElementById('results');
               resultsDiv.style.display = 'block';
               resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Loading...</div>';
@@ -4387,9 +4615,11 @@ return createUIResource({
                   if (event.data.type === 'toolResult' && event.data.requestId === requestId) {
                     resultsDiv.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(event.data.result, null, 2) + '</pre>';
                     window.removeEventListener('message', handleResponse);
+                    isExecuting = false;
                   } else if (event.data.type === 'toolError' && event.data.requestId === requestId) {
                     resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + event.data.error + '</div>';
                     window.removeEventListener('message', handleResponse);
+                    isExecuting = false;
                   }
                 };
                 
@@ -4402,20 +4632,69 @@ return createUIResource({
                   if (resultsDiv.innerHTML.includes('Loading...')) {
                     resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Request timed out after ' + (timeoutMs / 1000) + ' seconds</div>';
                   }
+                  isExecuting = false;
                 }, timeoutMs);
                 
               } catch (error) {
                 resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+              } finally {
+                isExecuting = false;
               }
             }
             
-            // Auto-execute on load
-            setTimeout(executeAction, 100);
+            // Auto-execution with execution guard
+            let isExecuting = false;
+            let hasExecuted = false;
+            
+            function startAutoExecution() {
+              if (hasExecuted) return;
+              
+              // Try immediate execution
+              setTimeout(() => {
+                if (!hasExecuted && !isExecuting) {
+                  executeAction();
+                  hasExecuted = true;
+                }
+              }, 100);
+            }
+            
+            // Start auto-execution when DOM is ready
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', startAutoExecution);
+            } else {
+              startAutoExecution();
+            }
           </script>
         `
       },
-      encoding: 'text'
+      encoding: 'text',
+      metadata: {
+        title: 'Team Matchup',
+        description: 'View current or historical matchup information for your team',
+        author: 'Yahoo Fantasy MCP',
+        created: new Date().toISOString(),
+        'mcp-ui': {
+          preferredFrameSize: {
+            width: 600,
+            height: 400
+          },
+          initialRenderData: {
+            teamKey: teamKey,
+            week: week
+          }
+        },
+        'openai/widgetDescription': 'View current or historical matchup information for your team',
+        'openai/widgetPrefersBorder': true,
+        'openai/widgetAccessible': true
+      }
     });
+  }
+
+  private createUIResources() {
+    // Import the MCP-UI server to get the resources
+    const { YahooFantasyMcpUIServer } = require('../server/mcp-ui-server.js');
+    const uiServer = new YahooFantasyMcpUIServer(this.credentials);
+    return uiServer.createFantasyUIResources();
   }
 
   // MCP-UI Tools
@@ -4434,6 +4713,12 @@ return createUIResource({
         required: ['leagueKey'],
         additionalProperties: false,
       },
+      _meta: {
+        'openai/outputTemplate': 'ui://templates/league-standings',
+        'openai/toolInvocation/invoking': 'Loading league standings...',
+        'openai/toolInvocation/invoked': 'League standings ready',
+        'openai/widgetAccessible': true,
+      },
     };
   }
 
@@ -4451,6 +4736,12 @@ return createUIResource({
         },
         required: ['teamKey'],
         additionalProperties: false,
+      },
+      _meta: {
+        'openai/outputTemplate': 'ui://templates/team-roster',
+        'openai/toolInvocation/invoking': 'Loading team roster...',
+        'openai/toolInvocation/invoked': 'Team roster ready',
+        'openai/widgetAccessible': true,
       },
     };
   }
@@ -4474,6 +4765,12 @@ return createUIResource({
         required: ['leagueKey'],
         additionalProperties: false,
       },
+      _meta: {
+        'openai/outputTemplate': 'ui://templates/free-agents',
+        'openai/toolInvocation/invoking': 'Loading free agents...',
+        'openai/toolInvocation/invoked': 'Free agents ready',
+        'openai/widgetAccessible': true,
+      },
     };
   }
 
@@ -4495,6 +4792,12 @@ return createUIResource({
         },
         required: ['teamKey'],
         additionalProperties: false,
+      },
+      _meta: {
+        'openai/outputTemplate': 'ui://templates/lineup-optimization',
+        'openai/toolInvocation/invoking': 'Optimizing lineup...',
+        'openai/toolInvocation/invoked': 'Lineup optimization ready',
+        'openai/widgetAccessible': true,
       },
     };
   }
@@ -4522,6 +4825,12 @@ return createUIResource({
         required: ['leagueKey'],
         additionalProperties: false,
       },
+      _meta: {
+        'openai/outputTemplate': 'ui://templates/player-search',
+        'openai/toolInvocation/invoking': 'Searching players...',
+        'openai/toolInvocation/invoked': 'Player search ready',
+        'openai/widgetAccessible': true,
+      },
     };
   }
 
@@ -4542,6 +4851,25 @@ return createUIResource({
           },
         },
         required: ['teamKey'],
+        additionalProperties: false,
+      },
+      _meta: {
+        'openai/outputTemplate': 'ui://templates/matchup',
+        'openai/toolInvocation/invoking': 'Loading matchup...',
+        'openai/toolInvocation/invoked': 'Matchup ready',
+        'openai/widgetAccessible': true,
+      },
+    };
+  }
+
+  private getUIResourcesTool(): Tool {
+    return {
+      name: 'get_ui_resources',
+      description: 'Get all available UI resources for fantasy sports tools',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: [],
         additionalProperties: false,
       },
     };
