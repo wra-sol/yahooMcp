@@ -1450,6 +1450,25 @@ export class YahooFantasyClient {
   }
 
   /**
+   * Transform Yahoo API field array format to object
+   * Yahoo sometimes returns data as arrays of field objects: [{field1: value}, {field2: value}]
+   * This converts them to a single object: {field1: value, field2: value}
+   */
+  private transformFieldArrayToObject(fieldArray: any[]): any {
+    if (!Array.isArray(fieldArray)) {
+      return fieldArray;
+    }
+
+    const result: any = {};
+    for (const fieldObj of fieldArray) {
+      if (typeof fieldObj === 'object' && fieldObj !== null) {
+        Object.assign(result, fieldObj);
+      }
+    }
+    return result;
+  }
+
+  /**
    * Parse Yahoo API collection format (objects with numeric keys)
    * Yahoo returns collections as: { "0": {item: ...}, "1": {item: ...}, count: N }
    */
@@ -1471,6 +1490,8 @@ export class YahooFantasyClient {
       const entry = collectionObj[key];
       if (!entry || typeof entry !== 'object') continue;
       
+      let processedItem: any = null;
+      
       // Check if this entry has the itemKey we're looking for
       if (itemKey in entry) {
         const itemData = entry[itemKey];
@@ -1480,12 +1501,24 @@ export class YahooFantasyClient {
           if (itemData.length > 0) {
             // If array contains objects, add them individually
             if (typeof itemData[0] === 'object' && itemData[0] !== null) {
-              items.push(itemData[0]);
+              processedItem = itemData[0];
             }
           }
         } else if (itemData && typeof itemData === 'object') {
-          items.push(itemData);
+          processedItem = itemData;
         }
+      } else if (Array.isArray(entry)) {
+        // Handle case where entry is directly an array of field objects
+        // This happens with some Yahoo API responses where each item is an array of field objects
+        processedItem = this.transformFieldArrayToObject(entry);
+      } else {
+        // Handle case where entry is already a properly structured object
+        // This is the normal case for most Yahoo API responses
+        processedItem = entry;
+      }
+      
+      if (processedItem && Object.keys(processedItem).length > 0) {
+        items.push(processedItem as T);
       }
     }
 
@@ -1505,7 +1538,24 @@ export class YahooFantasyClient {
     if (Array.isArray(leagueArray)) {
       for (const item of leagueArray) {
         if (item[collectionName]) {
-          return this.parseYahooCollection<T>(item[collectionName], itemKey);
+          const collection = item[collectionName];
+          
+          // Handle case where collection is an array of field arrays
+          if (Array.isArray(collection)) {
+            const items: T[] = [];
+            for (const fieldArray of collection) {
+              if (Array.isArray(fieldArray)) {
+                const transformedItem = this.transformFieldArrayToObject(fieldArray);
+                if (Object.keys(transformedItem).length > 0) {
+                  items.push(transformedItem as T);
+                }
+              }
+            }
+            return { items, count: items.length };
+          }
+          
+          // Handle normal collection format
+          return this.parseYahooCollection<T>(collection, itemKey);
         }
       }
     }
@@ -1525,7 +1575,24 @@ export class YahooFantasyClient {
     if (Array.isArray(teamArray)) {
       for (const item of teamArray) {
         if (item[collectionName]) {
-          return this.parseYahooCollection<T>(item[collectionName], itemKey);
+          const collection = item[collectionName];
+          
+          // Handle case where collection is an array of field arrays
+          if (Array.isArray(collection)) {
+            const items: T[] = [];
+            for (const fieldArray of collection) {
+              if (Array.isArray(fieldArray)) {
+                const transformedItem = this.transformFieldArrayToObject(fieldArray);
+                if (Object.keys(transformedItem).length > 0) {
+                  items.push(transformedItem as T);
+                }
+              }
+            }
+            return { items, count: items.length };
+          }
+          
+          // Handle normal collection format
+          return this.parseYahooCollection<T>(collection, itemKey);
         }
       }
     }
