@@ -65,6 +65,17 @@ export class YahooFantasyMcpServer {
         // Safely get result size
         const resultJson = JSON.stringify(result) || 'null';
         console.error(`[MCP] Tool '${name}' completed, result size: ${resultJson.length} bytes`);
+
+        if (result.type === 'resource') {
+          return {
+            content: [
+              {
+                type: 'resource',
+                resource: result.resource,
+              },
+            ],
+          };
+        }
         
         const response = {
           content: [

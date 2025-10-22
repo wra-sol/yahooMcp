@@ -78,22 +78,22 @@ async function main() {
       // Get token save callback from HTTP server for automatic token persistence
       const tokenSaveCallback = httpServer.getTokenSaveCallback();
       
-      const mcpServer = new YahooFantasyMcpServer(updatedCredentials, tokenSaveCallback);
+const mcpServer = new YahooFantasyMcpServer(updatedCredentials, tokenSaveCallback);
+       
+       // Set MCP server on HTTP server for SSE endpoint
+       httpServer.setMcpServer(mcpServer);
       
-      // Set MCP server on HTTP server for SSE endpoint
-      httpServer.setMcpServer(mcpServer);
-      
-      if (useStdio) {
-        // Use stdio transport (for local MCP clients like Cursor/Claude Desktop)
-        await mcpServer.start();
-        console.error('   MCP available via: stdio');
-      } else {
-        // Use SSE transport via HTTP (for remote clients like n8n)
-        console.error('   MCP available via: Official SSE Transport');
-        console.error(`   SSE Endpoint: http://localhost:${port}/mcp`);
-        console.error(`   Messages: http://localhost:${port}/mcp/messages`);
-        console.error('   Protocol: MCP v2024-11-05');
-      }
+if (useStdio) {
+         // Use stdio transport (for local MCP clients like Cursor/Claude Desktop)
+         await mcpServer.start();
+         console.error('   MCP available via: stdio');
+       } else {
+         // Use SSE transport via HTTP (for remote clients like n8n)
+         console.error('   MCP available via: Official SSE Transport');
+         console.error(`   SSE Endpoint: http://localhost:${port}/mcp`);
+         console.error(`   Messages: http://localhost:${port}/mcp/messages`);
+         console.error('   Protocol: MCP v2024-11-05');
+       }
     } else {
       console.error('');
       console.error('⚠️  No OAuth tokens found.');

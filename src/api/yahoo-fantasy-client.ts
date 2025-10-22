@@ -32,11 +32,18 @@ export class YahooFantasyClient {
   private tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>;
   private isRefreshing = false;
   private refreshPromise?: Promise<void>;
-  private requestTimeout = 30000; // 30 seconds default timeout
+  private requestTimeout = 60000; // 60 seconds default timeout (increased for deployed environments)
 
   constructor(credentials: OAuthCredentials, tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>) {
     this.oauthClient = new YahooOAuthClient(credentials);
     this.tokenSaveCallback = tokenSaveCallback;
+    
+    // Set timeout based on environment
+    if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) {
+      this.requestTimeout = 90000; // 90 seconds for production/deployed environments
+    } else {
+      this.requestTimeout = 30000; // 30 seconds for local development
+    }
   }
 
   /**
@@ -233,7 +240,8 @@ export class YahooFantasyClient {
     method: 'GET' | 'POST' | 'PUT',
     endpoint: string,
     data?: any,
-    retryCount = 0
+    retryCount = 0,
+    maxRetries = 2
   ): Promise<T> {
     if (!this.oauthClient.hasValidAccessToken()) {
       throw new AuthenticationError('No valid access token available. Please authenticate first.');
@@ -371,12 +379,25 @@ export class YahooFantasyClient {
         throw error;
       }
       
-      // Handle network errors
+      // Handle network errors with retry logic
       if (error.name === 'AbortError') {
-        throw new NetworkError(`Request timeout after ${this.requestTimeout}ms`, error);
+        if (retryCount < maxRetries) {
+          console.error(`⏰ Request timeout after ${this.requestTimeout}ms, retrying (${retryCount + 1}/${maxRetries})...`);
+          // Exponential backoff: wait 2^retryCount seconds
+          const delay = Math.pow(2, retryCount) * 1000;
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return this.makeRequest(method, endpoint, data, retryCount + 1, maxRetries);
+        }
+        throw new NetworkError(`Request timeout after ${this.requestTimeout}ms (${maxRetries} retries attempted)`, error);
       }
       
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        if (retryCount < maxRetries) {
+          console.error(`🌐 Network connection failed, retrying (${retryCount + 1}/${maxRetries})...`);
+          const delay = Math.pow(2, retryCount) * 1000;
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return this.makeRequest(method, endpoint, data, retryCount + 1, maxRetries);
+        }
         throw new NetworkError('Network connection failed. Please check your internet connection.', error);
       }
       
@@ -707,12 +728,20 @@ export class YahooFantasyClient {
    * Get league standings
    */
   async getLeagueStandings(leagueKey: string): Promise<{ standings: Standing[]; count: number }> {
-    const response = await this.makeRequest<any>('GET', `/league/${leagueKey}/standings`);
-    const parsed = this.extractLeagueCollection<Standing>(response, 'standings', 'team');
-    return {
-      standings: parsed.items,
-      count: parsed.count,
-    };
+    // Use longer timeout for standings as it can be slow
+    const originalTimeout = this.requestTimeout;
+    this.requestTimeout = Math.max(this.requestTimeout, 90000); // At least 90 seconds for standings
+    
+    try {
+      const response = await this.makeRequest<any>('GET', `/league/${leagueKey}/standings`);
+      const parsed = this.extractLeagueCollection<Standing>(response, 'standings', 'team');
+      return {
+        standings: parsed.items,
+        count: parsed.count,
+      };
+    } finally {
+      this.requestTimeout = originalTimeout;
+    }
   }
 
   /**
@@ -1092,14 +1121,22 @@ export class YahooFantasyClient {
     gameKey: string,
     filters?: PlayerFilters
   ): Promise<{ players: Player[]; count: number }> {
-    const params = this.buildPlayerFilterParams(filters);
-    const endpoint = `/games;game_keys=${gameKey}/players${params}`;
-    const response = await this.makeRequest<any>('GET', endpoint);
-    const parsed = this.parseYahooCollection<Player>(response.players, 'player');
-    return {
-      players: parsed.items,
-      count: parsed.count,
-    };
+    // Use longer timeout for player search as it can be slow
+    const originalTimeout = this.requestTimeout;
+    this.requestTimeout = Math.max(this.requestTimeout, 90000); // At least 90 seconds for player search
+    
+    try {
+      const params = this.buildPlayerFilterParams(filters);
+      const endpoint = `/games;game_keys=${gameKey}/players${params}`;
+      const response = await this.makeRequest<any>('GET', endpoint);
+      const parsed = this.parseYahooCollection<Player>(response.players, 'player');
+      return {
+        players: parsed.items,
+        count: parsed.count,
+      };
+    } finally {
+      this.requestTimeout = originalTimeout;
+    }
   }
 
   /**
@@ -1154,12 +1191,22 @@ export class YahooFantasyClient {
   ): Promise<{ players: Player[]; count: number }> {
     const positionParam = position ? `;position=${position}` : '';
     const endpoint = `/league/${leagueKey}/players${positionParam};status=${status};count=${count};start=${start}`;
-    const response = await this.makeRequest<any>('GET', endpoint);
-    const parsed = this.extractLeagueCollection<Player>(response, 'players', 'player');
-    return {
-      players: parsed.items,
-      count: parsed.count,
-    };
+    
+    // Use longer timeout for free agents as it's a heavy operation
+    const originalTimeout = this.requestTimeout;
+    this.requestTimeout = Math.max(this.requestTimeout, 120000); // At least 2 minutes for free agents
+    
+    try {
+      const response = await this.makeRequest<any>('GET', endpoint);
+      const parsed = this.extractLeagueCollection<Player>(response, 'players', 'player');
+      return {
+        players: parsed.items,
+        count: parsed.count,
+      };
+    } finally {
+      // Restore original timeout
+      this.requestTimeout = originalTimeout;
+    }
   }
 
   /**

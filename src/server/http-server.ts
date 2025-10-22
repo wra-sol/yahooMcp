@@ -73,6 +73,10 @@ export class HttpOAuthServer {
       return this.handleMcpUIDemo();
     }
 
+    if (pathname === '/mcp-ui' && req.method === 'GET') {
+      return await this.handleMcpUI();
+    }
+
     // Route: MCP SSE endpoint (official MCP SDK transport)
     if (pathname === '/mcp' && req.method === 'GET') {
       return this.handleMcpSseEndpoint(req);
@@ -97,6 +101,12 @@ export class HttpOAuthServer {
     // Route: MCP-UI action endpoint
     if (pathname === '/mcp-ui/action' && req.method === 'POST') {
       return this.handleMcpUIAction(req);
+    }
+
+    if (pathname.startsWith('/dist/ui/')) {
+      const filePath = path.join(process.cwd(), pathname);
+      const file = Bun.file(filePath);
+      return new Response(file);
     }
 
     // 404 Not Found
@@ -206,8 +216,11 @@ OAUTH_CALLBACK_URL=${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.
               <div style="background: #e7f3ff; border: 1px solid #b3d9ff; border-radius: 8px; padding: 20px; margin: 20px 0;">
                 <h3 style="margin-top: 0; color: #0066cc;">🎨 Try the Interactive UI Demo!</h3>
                 <p>Experience the power of MCP-UI with our interactive fantasy sports components:</p>
-                <a href="/mcp-ui-demo" class="button" style="background: #0066cc; color: white; text-decoration: none; display: inline-block; padding: 12px 24px; border-radius: 6px; font-weight: 500;">
-                  🚀 Launch MCP-UI Demo
+                <a href="/mcp-ui" class="button" style="background: #0066cc; color: white; text-decoration: none; display: inline-block; padding: 12px 24px; border-radius: 6px; font-weight: 500; margin-right: 10px;">
+                  🚀 MCP UI Client
+                </a>
+                <a href="/mcp-ui-demo" class="button" style="background: #28a745; color: white; text-decoration: none; display: inline-block; padding: 12px 24px; border-radius: 6px; font-weight: 500;">
+                  📱 Legacy Demo
                 </a>
                 <p style="margin-bottom: 0; font-size: 14px; color: #666;">
                   Interactive forms, real-time data, and dynamic UI components powered by MCP-UI
@@ -229,7 +242,8 @@ OAUTH_CALLBACK_URL=${process.env.OAUTH_CALLBACK_URL || `http://localhost:${this.
               </li>
               <li><strong>MCP-UI (Interactive Components):</strong>
                 <ul>
-                  <li><code>GET /mcp-ui-demo</code> - Interactive UI demo</li>
+                  <li><code>GET /mcp-ui</code> - MCP UI Client (React app)</li>
+                  <li><code>GET /mcp-ui-demo</code> - Legacy interactive UI demo</li>
                   <li><code>GET /mcp-ui/resources</code> - UI resources</li>
                   <li><code>GET /mcp-ui/component/{id}</code> - Specific component</li>
                   <li><code>POST /mcp-ui/action</code> - Execute UI actions</li>
@@ -862,7 +876,9 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
 
     try {
       const uiResources = this.mcpServer.getUIResources();
-      return new Response(JSON.stringify(uiResources), {
+      return new Response(JSON.stringify({ 
+        resources: uiResources 
+      }), {
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
@@ -953,6 +969,59 @@ YAHOO_SESSION_HANDLE=${accessToken.oauth_session_handle || ''}</pre>
       });
     } catch (error: any) {
       return new Response(`Error loading demo page: ${error.message}`, { status: 500 });
+    }
+  }
+
+  /**
+   * Handle MCP UI Client App
+   */
+  private async handleMcpUI(): Promise<Response> {
+    try {
+      // Read the base HTML template
+      const uiPath = path.join(process.cwd(), 'dist', 'ui', 'index.html');
+      const htmlTemplate = await Bun.file(uiPath).text();
+      
+      // Pre-fetch UI resources and inject them into the page
+      let resourcesHtml = '';
+      let initialDataScript = '';
+      
+      if (this.mcpServer) {
+        try {
+          const resources = this.mcpServer.getUIResources();
+          resourcesHtml = `<script>window.__INITIAL_RESOURCES__ = ${JSON.stringify(resources)};</script>`;
+          
+          // Pre-load resource content to prevent hydration issues
+          const enrichedResources = resources.map((resource: any) => ({
+            ...resource,
+            content: resource.content || { type: 'rawHtml', htmlString: '<div>Loading...</div>' },
+            encoding: resource.encoding || 'text'
+          }));
+          
+          initialDataScript = `<script>window.__MCP_UI_DATA__ = ${JSON.stringify({
+            resources: enrichedResources,
+            preloaded: true
+          })};</script>`;
+        } catch (error) {
+          console.error('Error pre-loading UI resources:', error);
+          resourcesHtml = '<script>window.__INITIAL_RESOURCES__ = [];</script>';
+        }
+      } else {
+        resourcesHtml = '<script>window.__INITIAL_RESOURCES__ = [];</script>';
+      }
+      
+      // Inject the data into the HTML template
+      const modifiedHtml = htmlTemplate.replace(
+        '<!-- Load MCP-UI client -->',
+        `<!-- Pre-loaded UI data -->${resourcesHtml}${initialDataScript}<!-- Load MCP-UI client -->`
+      );
+      
+      return new Response(modifiedHtml, {
+        headers: {
+          'Content-Type': 'text/html',
+        },
+      });
+    } catch (error: any) {
+      return new Response(`Error loading UI: ${error.message}`, { status: 500 });
     }
   }
 

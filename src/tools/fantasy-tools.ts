@@ -2215,7 +2215,7 @@ Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
       headers = {},
       params = {},
       body,
-      timeout = 10000,
+      timeout = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT ? 60000 : 15000,
       followRedirects = true,
     } = args;
 
@@ -3869,41 +3869,95 @@ Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
 
   // MCP-UI Creation Methods
   private createLeagueStandingsUI(leagueKey: string) {
-    return createUIResource({
-      uri: `ui://league-standings-${leagueKey}`,
+    const formFields = `
+      <label for="league_key" style="display: block; margin-bottom: 5px; font-weight: 500;">League Key:</label>
+      <input type="text" id="league_key" value="${leagueKey}" readonly
+             style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background-color: #f8f9fa;">
+    `;
+    
+return createUIResource({
+      uri: `ui://league-standings/${leagueKey}`,
       content: {
         type: 'rawHtml',
         htmlString: `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px;">
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 600px;">
             <h2 style="color: #333; margin-bottom: 20px;">📊 League Standings</h2>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-              <strong>League:</strong> ${leagueKey}
+            <div style="margin-bottom: 15px;">
+              ${formFields}
             </div>
-            <div id="standings-content" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #666;">
-              <div>Loading standings...</div>
+            <button onclick="executeAction()" 
+                    style="background-color: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+              Get Standings
+            </button>
+            <div id="results" style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; border: 1px solid #e9ecef; display: none;">
             </div>
           </div>
-          <script>
-            (async () => {
+<script>
+            let messageCounter = 0;
+            const pendingRequests = new Map();
+
+            function generateMessageId() {
+              return 'msg-' + Date.now() + '-' + (++messageCounter);
+            }
+
+            async function executeAction() {
+              const resultsDiv = document.getElementById('results');
+              resultsDiv.style.display = 'block';
+              resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Loading...</div>';
+              
               try {
-                const response = await fetch('/mcp-ui/action', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ 
-                    action: 'get_league_standings', 
-                    parameters: { leagueKey: '${leagueKey}' } 
-                  })
+                const messageId = generateMessageId();
+                const params = { league_key: document.getElementById('league_key').value };
+                
+                // Store the request context
+                pendingRequests.set(messageId, { 
+                  startTime: Date.now(),
+                  action: 'get_league_standings'
                 });
                 
-                if (!response.ok) throw new Error('Failed to load standings');
-                const data = await response.json();
+                window.parent.postMessage({
+                  type: 'tool',
+                  messageId: messageId,
+                  payload: { 
+                    toolName: 'get_league_standings', 
+                    params: params
+                  }
+                }, window.location.origin);
                 
-                const content = document.getElementById('standings-content');
-                content.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(data, null, 2) + '</pre>';
               } catch (error) {
-                document.getElementById('standings-content').innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+                resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
               }
-            })();
+            }
+
+            // Listen for responses from host
+            window.addEventListener('message', function(event) {
+              const message = event.data;
+              
+              if (!message.messageId || !pendingRequests.has(message.messageId)) {
+                return; // Not for us or unknown request
+              }
+              
+              const resultsDiv = document.getElementById('results');
+              const request = pendingRequests.get(message.messageId);
+              
+              switch (message.type) {
+                case 'ui-message-received':
+                  resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Request acknowledged, processing...</div>';
+                  break;
+                  
+                case 'ui-message-response':
+                  if (message.payload.error) {
+                    resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border:1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + JSON.stringify(message.payload.error) + '</div>';
+                  } else {
+                    resultsDiv.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(message.payload.response, null, 2) + '</pre>';
+                  }
+                  pendingRequests.delete(message.messageId);
+                  break;
+              }
+            });
+
+            // Auto-execute on load
+            setTimeout(executeAction, 100);
           </script>
         `
       },
@@ -3912,41 +3966,77 @@ Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
   }
 
   private createTeamRosterUI(teamKey: string) {
+    const formFields = `
+      <label for="team_key" style="display: block; margin-bottom: 5px; font-weight: 500;">Team Key:</label>
+      <input type="text" id="team_key" value="${teamKey}" readonly
+             style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background-color: #f8f9fa;">
+    `;
+    
     return createUIResource({
-      uri: `ui://team-roster-${teamKey}`,
+      uri: `ui://team-roster/${teamKey}`,
       content: {
         type: 'rawHtml',
         htmlString: `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px;">
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 600px;">
             <h2 style="color: #333; margin-bottom: 20px;">👥 Team Roster</h2>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-              <strong>Team:</strong> ${teamKey}
+            <div style="margin-bottom: 15px;">
+              ${formFields}
             </div>
-            <div id="roster-content" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #666;">
-              <div>Loading roster...</div>
+            <button onclick="executeAction()" 
+                    style="background-color: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+              Get Roster
+            </button>
+            <div id="results" style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; border: 1px solid #e9ecef; display: none;">
             </div>
           </div>
           <script>
-            (async () => {
+            async function executeAction() {
+              const resultsDiv = document.getElementById('results');
+              resultsDiv.style.display = 'block';
+              resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Loading...</div>';
+              
               try {
-                const response = await fetch('/mcp-ui/action', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ 
-                    action: 'get_team_roster', 
-                    parameters: { teamKey: '${teamKey}' } 
-                  })
-                });
+                const requestId = Date.now().toString();
+                const params = { team_key: document.getElementById('team_key').value };
                 
-                if (!response.ok) throw new Error('Failed to load roster');
-                const data = await response.json();
+                window.parent.postMessage({
+                  type: 'tool',
+                  requestId: requestId,
+                  payload: {
+                    toolName: 'get_team_roster',
+                    params: params
+                  }
+                }, window.location.origin);
                 
-                const content = document.getElementById('roster-content');
-                content.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(data, null, 2) + '</pre>';
+                // Listen for response
+                const handleResponse = (event) => {
+                  if (event.data.type === 'toolResult' && event.data.requestId === requestId) {
+                    resultsDiv.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(event.data.result, null, 2) + '</pre>';
+                    window.removeEventListener('message', handleResponse);
+                  } else if (event.data.type === 'toolError' && event.data.requestId === requestId) {
+                    resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + event.data.error + '</div>';
+                    window.removeEventListener('message', handleResponse);
+                  }
+                };
+                
+                window.addEventListener('message', handleResponse);
+                
+                // Timeout after 60 seconds for deployed environments, 30 for local
+                const timeoutMs = window.location.hostname === 'localhost' ? 30000 : 60000;
+                setTimeout(() => {
+                  window.removeEventListener('message', handleResponse);
+                  if (resultsDiv.innerHTML.includes('Loading...')) {
+                    resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Request timed out after ' + (timeoutMs / 1000) + ' seconds</div>';
+                  }
+                }, timeoutMs);
+                
               } catch (error) {
-                document.getElementById('roster-content').innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+                resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
               }
-            })();
+            }
+            
+            // Auto-execute on load
+            setTimeout(executeAction, 100);
           </script>
         `
       },
@@ -3955,44 +4045,95 @@ Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
   }
 
   private createFreeAgentsUI(leagueKey: string, position?: string) {
+    const formFields = `
+      <label for="league_key" style="display: block; margin-bottom: 5px; font-weight: 500;">League Key:</label>
+      <input type="text" id="league_key" value="${leagueKey}" readonly
+             style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background-color: #f8f9fa;">
+      <label for="position" style="display: block; margin: 15px 0 5px; font-weight: 500;">Position Filter:</label>
+      <select id="position" style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+        <option value="">All Positions</option>
+        <option value="C" ${position === 'C' ? 'selected' : ''}>Catcher</option>
+        <option value="1B" ${position === '1B' ? 'selected' : ''}>First Base</option>
+        <option value="2B" ${position === '2B' ? 'selected' : ''}>Second Base</option>
+        <option value="SS" ${position === 'SS' ? 'selected' : ''}>Shortstop</option>
+        <option value="3B" ${position === '3B' ? 'selected' : ''}>Third Base</option>
+        <option value="OF" ${position === 'OF' ? 'selected' : ''}>Outfield</option>
+        <option value="SP" ${position === 'SP' ? 'selected' : ''}>Starting Pitcher</option>
+        <option value="RP" ${position === 'RP' ? 'selected' : ''}>Relief Pitcher</option>
+        <option value="P" ${position === 'P' ? 'selected' : ''}>Pitcher</option>
+      </select>
+    `;
+    
     return createUIResource({
-      uri: `ui://free-agents-${leagueKey}`,
+      uri: `ui://free-agents/${leagueKey}`,
       content: {
         type: 'rawHtml',
         htmlString: `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px;">
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 600px;">
             <h2 style="color: #333; margin-bottom: 20px;">🆓 Free Agents</h2>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-              <strong>League:</strong> ${leagueKey}${position ? `<br><strong>Position:</strong> ${position}` : ''}
+            <div style="margin-bottom: 15px;">
+              ${formFields}
             </div>
-            <div id="free-agents-content" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #666;">
-              <div>Loading free agents...</div>
+            <button onclick="executeAction()" 
+                    style="background-color: #ffc107; color: #212529; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+              Get Free Agents
+            </button>
+            <div id="results" style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; border: 1px solid #e9ecef; display: none;">
             </div>
           </div>
           <script>
-            (async () => {
+            async function executeAction() {
+              const resultsDiv = document.getElementById('results');
+              resultsDiv.style.display = 'block';
+              resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Loading...</div>';
+              
               try {
-                const parameters = { leagueKey: '${leagueKey}' };
-                ${position ? `parameters.position = '${position}';` : ''}
+                const requestId = Date.now().toString();
+                const params = { 
+                  league_key: document.getElementById('league_key').value 
+                };
                 
-                const response = await fetch('/mcp-ui/action', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ 
-                    action: 'get_free_agents', 
-                    parameters: parameters 
-                  })
-                });
+                const position = document.getElementById('position').value;
+                if (position) params.position = position;
                 
-                if (!response.ok) throw new Error('Failed to load free agents');
-                const data = await response.json();
+                window.parent.postMessage({
+                  type: 'tool',
+                  requestId: requestId,
+                  payload: {
+                    toolName: 'get_free_agents',
+                    params: params
+                  }
+                }, window.location.origin);
                 
-                const content = document.getElementById('free-agents-content');
-                content.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(data, null, 2) + '</pre>';
+                // Listen for response
+                const handleResponse = (event) => {
+                  if (event.data.type === 'toolResult' && event.data.requestId === requestId) {
+                    resultsDiv.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(event.data.result, null, 2) + '</pre>';
+                    window.removeEventListener('message', handleResponse);
+                  } else if (event.data.type === 'toolError' && event.data.requestId === requestId) {
+                    resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + event.data.error + '</div>';
+                    window.removeEventListener('message', handleResponse);
+                  }
+                };
+                
+                window.addEventListener('message', handleResponse);
+                
+                // Timeout after 60 seconds for deployed environments, 30 for local
+                const timeoutMs = window.location.hostname === 'localhost' ? 30000 : 60000;
+                setTimeout(() => {
+                  window.removeEventListener('message', handleResponse);
+                  if (resultsDiv.innerHTML.includes('Loading...')) {
+                    resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Request timed out after ' + (timeoutMs / 1000) + ' seconds</div>';
+                  }
+                }, timeoutMs);
+                
               } catch (error) {
-                document.getElementById('free-agents-content').innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+                resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
               }
-            })();
+            }
+            
+            // Auto-execute on load
+            setTimeout(executeAction, 100);
           </script>
         `
       },
@@ -4001,44 +4142,86 @@ Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
   }
 
   private createLineupOptimizationUI(teamKey: string, optimizationType?: string) {
+    const formFields = `
+      <label for="team_key" style="display: block; margin-bottom: 5px; font-weight: 500;">Team Key:</label>
+      <input type="text" id="team_key" value="${teamKey}" readonly
+             style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background-color: #f8f9fa;">
+      <label for="optimization_type" style="display: block; margin: 15px 0 5px; font-weight: 500;">Optimization Type:</label>
+      <select id="optimization_type" style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+        <option value="projected" ${optimizationType === 'projected' ? 'selected' : ''}>Projected Points</option>
+        <option value="recent" ${optimizationType === 'recent' ? 'selected' : ''}>Recent Performance</option>
+        <option value="season" ${optimizationType === 'season' ? 'selected' : ''}>Season Averages</option>
+      </select>
+    `;
+    
     return createUIResource({
-      uri: `ui://lineup-optimization-${teamKey}`,
+      uri: `ui://lineup-optimization/${teamKey}`,
       content: {
         type: 'rawHtml',
         htmlString: `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px;">
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 600px;">
             <h2 style="color: #333; margin-bottom: 20px;">⚡ Lineup Optimization</h2>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-              <strong>Team:</strong> ${teamKey}${optimizationType ? `<br><strong>Type:</strong> ${optimizationType}` : ''}
+            <div style="margin-bottom: 15px;">
+              ${formFields}
             </div>
-            <div id="optimization-content" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #666;">
-              <div>Optimizing lineup...</div>
+            <button onclick="executeAction()" 
+                    style="background-color: #17a2b8; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+              Optimize Lineup
+            </button>
+            <div id="results" style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; border: 1px solid #e9ecef; display: none;">
             </div>
           </div>
           <script>
-            (async () => {
+            async function executeAction() {
+              const resultsDiv = document.getElementById('results');
+              resultsDiv.style.display = 'block';
+              resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Loading...</div>';
+              
               try {
-                const parameters = { teamKey: '${teamKey}' };
-                ${optimizationType ? `parameters.optimizationType = '${optimizationType}';` : ''}
+                const requestId = Date.now().toString();
+                const params = { 
+                  team_key: document.getElementById('team_key').value,
+                  optimization_type: document.getElementById('optimization_type').value
+                };
                 
-                const response = await fetch('/mcp-ui/action', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ 
-                    action: 'get_lineup_optimization', 
-                    parameters: parameters 
-                  })
-                });
+                window.parent.postMessage({
+                  type: 'tool',
+                  requestId: requestId,
+                  payload: {
+                    toolName: 'get_lineup_optimization',
+                    params: params
+                  }
+                }, window.location.origin);
                 
-                if (!response.ok) throw new Error('Failed to optimize lineup');
-                const data = await response.json();
+                // Listen for response
+                const handleResponse = (event) => {
+                  if (event.data.type === 'toolResult' && event.data.requestId === requestId) {
+                    resultsDiv.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(event.data.result, null, 2) + '</pre>';
+                    window.removeEventListener('message', handleResponse);
+                  } else if (event.data.type === 'toolError' && event.data.requestId === requestId) {
+                    resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + event.data.error + '</div>';
+                    window.removeEventListener('message', handleResponse);
+                  }
+                };
                 
-                const content = document.getElementById('optimization-content');
-                content.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(data, null, 2) + '</pre>';
+                window.addEventListener('message', handleResponse);
+                
+                // Timeout after 60 seconds for deployed environments, 30 for local
+                const timeoutMs = window.location.hostname === 'localhost' ? 30000 : 60000;
+                setTimeout(() => {
+                  window.removeEventListener('message', handleResponse);
+                  if (resultsDiv.innerHTML.includes('Loading...')) {
+                    resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Request timed out after ' + (timeoutMs / 1000) + ' seconds</div>';
+                  }
+                }, timeoutMs);
+                
               } catch (error) {
-                document.getElementById('optimization-content').innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+                resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
               }
-            })();
+            }
+            
+            // Auto-execute on load
+            setTimeout(executeAction, 100);
           </script>
         `
       },
@@ -4047,45 +4230,100 @@ Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
   }
 
   private createPlayerSearchUI(leagueKey: string, playerName?: string, position?: string) {
+    const formFields = `
+      <label for="league_key" style="display: block; margin-bottom: 5px; font-weight: 500;">League Key:</label>
+      <input type="text" id="league_key" value="${leagueKey}" readonly
+             style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background-color: #f8f9fa;">
+      <label for="name" style="display: block; margin: 15px 0 5px; font-weight: 500;">Player Name:</label>
+      <input type="text" id="name" value="${playerName || ''}" placeholder="e.g., Mike Trout" 
+             style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+      <label for="position" style="display: block; margin: 15px 0 5px; font-weight: 500;">Position:</label>
+      <select id="position" style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+        <option value="">All Positions</option>
+        <option value="C" ${position === 'C' ? 'selected' : ''}>Catcher</option>
+        <option value="1B" ${position === '1B' ? 'selected' : ''}>First Base</option>
+        <option value="2B" ${position === '2B' ? 'selected' : ''}>Second Base</option>
+        <option value="SS" ${position === 'SS' ? 'selected' : ''}>Shortstop</option>
+        <option value="3B" ${position === '3B' ? 'selected' : ''}>Third Base</option>
+        <option value="OF" ${position === 'OF' ? 'selected' : ''}>Outfield</option>
+        <option value="SP" ${position === 'SP' ? 'selected' : ''}>Starting Pitcher</option>
+        <option value="RP" ${position === 'RP' ? 'selected' : ''}>Relief Pitcher</option>
+        <option value="P" ${position === 'P' ? 'selected' : ''}>Pitcher</option>
+      </select>
+    `;
+    
     return createUIResource({
-      uri: `ui://player-search-${leagueKey}`,
+      uri: `ui://player-search/${leagueKey}`,
       content: {
         type: 'rawHtml',
         htmlString: `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px;">
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 600px;">
             <h2 style="color: #333; margin-bottom: 20px;">🔍 Player Search</h2>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-              <strong>League:</strong> ${leagueKey}${playerName ? `<br><strong>Player:</strong> ${playerName}` : ''}${position ? `<br><strong>Position:</strong> ${position}` : ''}
+            <div style="margin-bottom: 15px;">
+              ${formFields}
             </div>
-            <div id="search-content" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #666;">
-              <div>Searching players...</div>
+            <button onclick="executeAction()" 
+                    style="background-color: #6f42c1; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+              Search Players
+            </button>
+            <div id="results" style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; border: 1px solid #e9ecef; display: none;">
             </div>
           </div>
           <script>
-            (async () => {
+            async function executeAction() {
+              const resultsDiv = document.getElementById('results');
+              resultsDiv.style.display = 'block';
+              resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Loading...</div>';
+              
               try {
-                const parameters = { leagueKey: '${leagueKey}' };
-                ${playerName ? `parameters.playerName = '${playerName}';` : ''}
-                ${position ? `parameters.position = '${position}';` : ''}
+                const requestId = Date.now().toString();
+                const params = { 
+                  league_key: document.getElementById('league_key').value 
+                };
                 
-                const response = await fetch('/mcp-ui/action', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ 
-                    action: 'search_players', 
-                    parameters: parameters 
-                  })
-                });
+                const name = document.getElementById('name').value;
+                if (name) params.name = name;
                 
-                if (!response.ok) throw new Error('Failed to search players');
-                const data = await response.json();
+                const position = document.getElementById('position').value;
+                if (position) params.position = position;
                 
-                const content = document.getElementById('search-content');
-                content.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(data, null, 2) + '</pre>';
+                window.parent.postMessage({
+                  type: 'tool',
+                  requestId: requestId,
+                  payload: {
+                    toolName: 'search_players',
+                    params: params
+                  }
+                }, window.location.origin);
+                
+                // Listen for response
+                const handleResponse = (event) => {
+                  if (event.data.type === 'toolResult' && event.data.requestId === requestId) {
+                    resultsDiv.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(event.data.result, null, 2) + '</pre>';
+                    window.removeEventListener('message', handleResponse);
+                  } else if (event.data.type === 'toolError' && event.data.requestId === requestId) {
+                    resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + event.data.error + '</div>';
+                    window.removeEventListener('message', handleResponse);
+                  }
+                };
+                
+                window.addEventListener('message', handleResponse);
+                
+                // Timeout after 60 seconds for deployed environments, 30 for local
+                const timeoutMs = window.location.hostname === 'localhost' ? 30000 : 60000;
+                setTimeout(() => {
+                  window.removeEventListener('message', handleResponse);
+                  if (resultsDiv.innerHTML.includes('Loading...')) {
+                    resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Request timed out after ' + (timeoutMs / 1000) + ' seconds</div>';
+                  }
+                }, timeoutMs);
+                
               } catch (error) {
-                document.getElementById('search-content').innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+                resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
               }
-            })();
+            }
+            
+            // Don't auto-execute on load for search (user needs to input search terms)
           </script>
         `
       },
@@ -4094,44 +4332,85 @@ Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
   }
 
   private createMatchupUI(teamKey: string, week?: number) {
+    const formFields = `
+      <label for="team_key" style="display: block; margin-bottom: 5px; font-weight: 500;">Team Key:</label>
+      <input type="text" id="team_key" value="${teamKey}" readonly
+             style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background-color: #f8f9fa;">
+      <label for="week" style="display: block; margin: 15px 0 5px; font-weight: 500;">Week (optional):</label>
+      <input type="number" id="week" value="${week || ''}" placeholder="e.g., 1" 
+             style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+    `;
+    
     return createUIResource({
-      uri: `ui://matchup-${teamKey}`,
+      uri: `ui://matchup/${teamKey}`,
       content: {
         type: 'rawHtml',
         htmlString: `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px;">
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 600px;">
             <h2 style="color: #333; margin-bottom: 20px;">⚔️ Team Matchup</h2>
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-              <strong>Team:</strong> ${teamKey}${week ? `<br><strong>Week:</strong> ${week}` : ''}
+            <div style="margin-bottom: 15px;">
+              ${formFields}
             </div>
-            <div id="matchup-content" style="min-height: 200px; display: flex; align-items: center; justify-content: center; color: #666;">
-              <div>Loading matchup...</div>
+            <button onclick="executeAction()" 
+                    style="background-color: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+              Get Matchup
+            </button>
+            <div id="results" style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 4px; border: 1px solid #e9ecef; display: none;">
             </div>
           </div>
           <script>
-            (async () => {
+            async function executeAction() {
+              const resultsDiv = document.getElementById('results');
+              resultsDiv.style.display = 'block';
+              resultsDiv.innerHTML = '<div style="text-align: center; color: #666; font-style: italic;">Loading...</div>';
+              
               try {
-                const parameters = { teamKey: '${teamKey}' };
-                ${week ? `parameters.week = ${week};` : ''}
+                const requestId = Date.now().toString();
+                const params = { 
+                  team_key: document.getElementById('team_key').value 
+                };
                 
-                const response = await fetch('/mcp-ui/action', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ 
-                    action: 'get_team_matchup', 
-                    parameters: parameters 
-                  })
-                });
+                const week = document.getElementById('week').value;
+                if (week) params.week = parseInt(week);
                 
-                if (!response.ok) throw new Error('Failed to load matchup');
-                const data = await response.json();
+                window.parent.postMessage({
+                  type: 'tool',
+                  requestId: requestId,
+                  payload: {
+                    toolName: 'get_team_matchup',
+                    params: params
+                  }
+                }, window.location.origin);
                 
-                const content = document.getElementById('matchup-content');
-                content.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(data, null, 2) + '</pre>';
+                // Listen for response
+                const handleResponse = (event) => {
+                  if (event.data.type === 'toolResult' && event.data.requestId === requestId) {
+                    resultsDiv.innerHTML = '<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; font-size: 12px;">' + JSON.stringify(event.data.result, null, 2) + '</pre>';
+                    window.removeEventListener('message', handleResponse);
+                  } else if (event.data.type === 'toolError' && event.data.requestId === requestId) {
+                    resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + event.data.error + '</div>';
+                    window.removeEventListener('message', handleResponse);
+                  }
+                };
+                
+                window.addEventListener('message', handleResponse);
+                
+                // Timeout after 60 seconds for deployed environments, 30 for local
+                const timeoutMs = window.location.hostname === 'localhost' ? 30000 : 60000;
+                setTimeout(() => {
+                  window.removeEventListener('message', handleResponse);
+                  if (resultsDiv.innerHTML.includes('Loading...')) {
+                    resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Request timed out after ' + (timeoutMs / 1000) + ' seconds</div>';
+                  }
+                }, timeoutMs);
+                
               } catch (error) {
-                document.getElementById('matchup-content').innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
+                resultsDiv.innerHTML = '<div style="color: #dc3545; background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px;">Error: ' + error.message + '</div>';
               }
-            })();
+            }
+            
+            // Auto-execute on load
+            setTimeout(executeAction, 100);
           </script>
         `
       },
