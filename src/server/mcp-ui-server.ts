@@ -267,11 +267,11 @@ function createPostMessageUI(uri: `ui://${string}`, title: string, formFields: s
                 
                 window.addEventListener('message', handleResponse);
                 
-                // Timeout handler
+                // Timeout handler - increased to match server timeouts
                 const timeout = setTimeout(() => {
                   cleanup();
-                  displayError('Request timed out after 30 seconds');
-                }, 30000);
+                  displayError('Request timed out after 3 minutes');
+                }, 180000);
                 
                 function cleanup() {
                   window.removeEventListener('message', handleResponse);

@@ -97,8 +97,14 @@ export class YahooFantasyMcpServer {
           throw new Error(`Tool '${name}' not found`);
         }
 
-        // Execute the tool
-        const result = await this.fantasyTools.executeTool(name, args);
+        // Execute the tool with extended timeout for league settings
+        const timeoutMs = name === 'get_league_settings' ? 300000 : 120000; // 5 minutes for league settings, 2 minutes for others
+        const result = await Promise.race([
+          this.fantasyTools.executeTool(name, args),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Tool '${name}' timed out after ${timeoutMs}ms`)), timeoutMs)
+          )
+        ]);
         
         // Safely get result size
         const resultJson = JSON.stringify(result) || 'null';

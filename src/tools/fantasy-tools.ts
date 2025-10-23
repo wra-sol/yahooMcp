@@ -114,6 +114,8 @@ export class FantasyTools {
       this.getGameStatCategoriesTool(),
       this.getLeagueTool(),
       this.getLeagueSettingsTool(),
+      this.getGameKeysTool(),
+      this.formatLeagueKeyTool(),
       this.getLeagueMetadataTool(),
       this.getLeagueRostersTool(),
       this.getDraftResultsTool(),
@@ -343,6 +345,41 @@ export class FantasyTools {
           },
         },
         required: ['leagueKey'],
+        additionalProperties: false,
+      },
+    };
+  }
+
+  private getGameKeysTool(): Tool {
+    return {
+      name: 'get_game_keys',
+      description: 'Get available game keys for Yahoo Fantasy Sports',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+    };
+  }
+
+  private formatLeagueKeyTool(): Tool {
+    return {
+      name: 'format_league_key',
+      description: 'Format a league ID into a proper Yahoo Fantasy league key',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          leagueId: {
+            type: 'string',
+            description: 'The league ID number (e.g., "123456")',
+          },
+          gameKey: {
+            type: 'string',
+            description: 'The game key (e.g., "414" for NFL, "414" for MLB, etc.)',
+          },
+        },
+        required: ['leagueId', 'gameKey'],
         additionalProperties: false,
       },
     };
@@ -1795,11 +1832,35 @@ Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
   }
 
   /**
+   * Validate and format league key
+   */
+  private validateLeagueKey(leagueKey: string): string {
+    // Check if league key is in correct format: {game_key}.l.{league_id}
+    if (leagueKey.includes('.l.')) {
+      return leagueKey;
+    }
+    
+    // If it's just a number, it's likely a league ID without game key
+    if (/^\d+$/.test(leagueKey)) {
+      console.error(`⚠️  Invalid league key format: "${leagueKey}". Expected format: "414.l.${leagueKey}" (for NFL) or "414.l.${leagueKey}" (for other sports)`);
+      throw new Error(`Invalid league key format: "${leagueKey}". League keys must be in the format "414.l.123456" where 414 is the game key and 123456 is the league ID. You provided just the league ID. Please use the full league key from your Yahoo Fantasy league URL.`);
+    }
+    
+    return leagueKey;
+  }
+
+  /**
    * Execute a tool by name with parameters
    */
   async executeTool(name: string, args: any): Promise<any> {
     console.error(`[executeTool] Called with name=${name}, args=${JSON.stringify(args).substring(0, 200)}`);
+    
     try {
+      // Validate league key if present
+      if (args.leagueKey) {
+        args.leagueKey = this.validateLeagueKey(args.leagueKey);
+      }
+      
       switch (name) {
         case 'get_user_games':
           return await this.client.getUserGames(args.gameKeys);
@@ -1833,6 +1894,28 @@ Perfect for daily leagues (NHL/MLB/NBA) where lineup optimization is crucial.`,
 
         case 'get_league_settings':
           return await this.client.getLeagueSettings(args.leagueKey);
+
+        case 'get_game_keys':
+          return {
+            gameKeys: [
+              { key: '414', name: 'NFL Fantasy Football', season: '2024' },
+              { key: '414', name: 'MLB Fantasy Baseball', season: '2024' },
+              { key: '414', name: 'NBA Fantasy Basketball', season: '2024-25' },
+              { key: '414', name: 'NHL Fantasy Hockey', season: '2024-25' },
+              { key: '414', name: 'NASCAR Fantasy Racing', season: '2024' },
+            ],
+            note: '⚠️ These are common game keys, but they may vary by season and account. For the most accurate game keys, use getUserGames() to get the current available games for your specific account.',
+            recommendation: 'If you\'re getting "Invalid game key" errors, try using getUserGames() first to see what game keys are available for your account.'
+          };
+
+        case 'format_league_key':
+          const formattedKey = `${args.gameKey}.l.${args.leagueId}`;
+          return {
+            originalLeagueId: args.leagueId,
+            gameKey: args.gameKey,
+            formattedLeagueKey: formattedKey,
+            note: `Use "${formattedKey}" as your league key in other tools.`
+          };
 
         case 'get_league_metadata':
           return await this.client.getLeagueMetadata(args.leagueKey);
@@ -4076,8 +4159,8 @@ return createUIResource({
                 
                 window.addEventListener('message', handleResponse);
                 
-                // Timeout after 60 seconds for deployed environments, 30 for local
-                const timeoutMs = window.location.hostname === 'localhost' ? 30000 : 60000;
+                // Timeout after 3 minutes for league settings, 60 seconds for other operations
+                const timeoutMs = window.location.hostname === 'localhost' ? 180000 : 180000;
                 setTimeout(() => {
                   window.removeEventListener('message', handleResponse);
                   if (resultsDiv.innerHTML.includes('Loading...')) {
@@ -4219,8 +4302,8 @@ return createUIResource({
                 
                 window.addEventListener('message', handleResponse);
                 
-                // Timeout after 60 seconds for deployed environments, 30 for local
-                const timeoutMs = window.location.hostname === 'localhost' ? 30000 : 60000;
+                // Timeout after 3 minutes for league settings, 60 seconds for other operations
+                const timeoutMs = window.location.hostname === 'localhost' ? 180000 : 180000;
                 setTimeout(() => {
                   window.removeEventListener('message', handleResponse);
                   if (resultsDiv.innerHTML.includes('Loading...')) {
@@ -4354,8 +4437,8 @@ return createUIResource({
                 
                 window.addEventListener('message', handleResponse);
                 
-                // Timeout after 60 seconds for deployed environments, 30 for local
-                const timeoutMs = window.location.hostname === 'localhost' ? 30000 : 60000;
+                // Timeout after 3 minutes for league settings, 60 seconds for other operations
+                const timeoutMs = window.location.hostname === 'localhost' ? 180000 : 180000;
                 setTimeout(() => {
                   window.removeEventListener('message', handleResponse);
                   if (resultsDiv.innerHTML.includes('Loading...')) {
@@ -4504,8 +4587,8 @@ return createUIResource({
                 
                 window.addEventListener('message', handleResponse);
                 
-                // Timeout after 60 seconds for deployed environments, 30 for local
-                const timeoutMs = window.location.hostname === 'localhost' ? 30000 : 60000;
+                // Timeout after 3 minutes for league settings, 60 seconds for other operations
+                const timeoutMs = window.location.hostname === 'localhost' ? 180000 : 180000;
                 setTimeout(() => {
                   window.removeEventListener('message', handleResponse);
                   if (resultsDiv.innerHTML.includes('Loading...')) {
@@ -4625,8 +4708,8 @@ return createUIResource({
                 
                 window.addEventListener('message', handleResponse);
                 
-                // Timeout after 60 seconds for deployed environments, 30 for local
-                const timeoutMs = window.location.hostname === 'localhost' ? 30000 : 60000;
+                // Timeout after 3 minutes for league settings, 60 seconds for other operations
+                const timeoutMs = window.location.hostname === 'localhost' ? 180000 : 180000;
                 setTimeout(() => {
                   window.removeEventListener('message', handleResponse);
                   if (resultsDiv.innerHTML.includes('Loading...')) {

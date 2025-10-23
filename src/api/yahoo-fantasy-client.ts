@@ -735,15 +735,34 @@ export class YahooFantasyClient {
    * Get league settings
    */
   async getLeagueSettings(leagueKey: string): Promise<string> {
-    // Use longer timeout for league settings as it can be slow
+    console.error(`🏒 [getLeagueSettings] Starting request for league: ${leagueKey}`);
+    
+    // Use much longer timeout for league settings as it can be very slow
     const originalTimeout = this.requestTimeout;
-    this.requestTimeout = 120000; // 2 minutes for league settings
+    this.requestTimeout = 180000; // 3 minutes for league settings
     
     try {
-      return this.makeRequest<string>('GET', `/league/${leagueKey}/settings`);
+      console.error(`🏒 [getLeagueSettings] Using timeout: ${this.requestTimeout}ms`);
+      const result = await this.makeRequest<string>('GET', `/league/${leagueKey}/settings`);
+      console.error(`🏒 [getLeagueSettings] Request completed successfully`);
+      return result;
+    } catch (error: any) {
+      console.error(`🏒 [getLeagueSettings] Request failed:`, error.message);
+      console.error(`🏒 [getLeagueSettings] Error details:`, JSON.stringify(error, null, 2));
+      
+      // Check if it's a 400 error with invalid game key
+      if (error.message && error.message.includes('Invalid game key')) {
+        throw new Error(`Invalid league key format: "${leagueKey}". The game key in your league key may be incorrect. Try using getUserGames() to get the correct game keys for your account, then use format_league_key to create the proper league key.`);
+      }
+      
+      if (error.name === 'AbortError') {
+        throw new NetworkError(`League settings request timed out after ${this.requestTimeout}ms. This league may have very large settings data or the Yahoo API is experiencing slowness.`, error);
+      }
+      throw error;
     } finally {
       // Restore original timeout
       this.requestTimeout = originalTimeout;
+      console.error(`🏒 [getLeagueSettings] Restored timeout to: ${this.requestTimeout}ms`);
     }
   }
 
