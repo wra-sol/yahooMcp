@@ -737,9 +737,9 @@ export class YahooFantasyClient {
   async getLeagueSettings(leagueKey: string): Promise<string> {
     console.error(`🏒 [getLeagueSettings] Starting request for league: ${leagueKey}`);
     
-    // Use much longer timeout for league settings as it can be very slow
+    // Use a more reasonable timeout that should work with MCP clients
     const originalTimeout = this.requestTimeout;
-    this.requestTimeout = 180000; // 3 minutes for league settings
+    this.requestTimeout = 90000; // 90 seconds for league settings (reduced from 180s)
     
     try {
       console.error(`🏒 [getLeagueSettings] Using timeout: ${this.requestTimeout}ms`);

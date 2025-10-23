@@ -97,41 +97,29 @@ export class YahooFantasyMcpServer {
           throw new Error(`Tool '${name}' not found`);
         }
 
-        // Execute the tool with extended timeout for league settings
-        const timeoutMs = name === 'get_league_settings' ? 300000 : 120000; // 5 minutes for league settings, 2 minutes for others
-        const result = await Promise.race([
-          this.fantasyTools.executeTool(name, args),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error(`Tool '${name}' timed out after ${timeoutMs}ms`)), timeoutMs)
-          )
-        ]);
+        // Execute the tool with progress updates for long-running operations
+        console.error(`[MCP] Starting tool execution: ${name}`);
         
-        // Safely get result size
-        const resultJson = JSON.stringify(result) || 'null';
-        console.error(`[MCP] Tool '${name}' completed, result size: ${resultJson.length} bytes`);
-
-        if (result.type === 'resource') {
-          return {
-            content: [
-              {
-                type: 'resource',
-                resource: result.resource,
-              },
-            ],
-          };
+        // For get_league_settings, implement a timeout-aware approach
+        if (name === 'get_league_settings') {
+          console.error(`[MCP] Using extended timeout for get_league_settings`);
+          
+          // Set a reasonable timeout that should work with most MCP clients
+          const timeoutMs = 120000; // 2 minutes (should be enough for 90s API call)
+          
+          const result = await Promise.race([
+            this.fantasyTools.executeTool(name, args),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error(`Tool '${name}' timed out after ${timeoutMs}ms`)), timeoutMs)
+            )
+          ]);
+          
+          return this.formatResponse(name, result);
         }
         
-        const response = {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(result, null, 2) || 'null',
-            },
-          ],
-        };
-        
-        console.error(`[MCP] Returning response for tool '${name}'`);
-        return response;
+        // For other tools, execute normally
+        const result = await this.fantasyTools.executeTool(name, args);
+        return this.formatResponse(name, result);
       } catch (error: any) {
         return {
           content: [
@@ -144,6 +132,38 @@ export class YahooFantasyMcpServer {
         };
       }
     });
+  }
+
+  /**
+   * Format tool response consistently
+   */
+  private formatResponse(name: string, result: any) {
+    // Safely get result size
+    const resultJson = JSON.stringify(result) || 'null';
+    console.error(`[MCP] Tool '${name}' completed, result size: ${resultJson.length} bytes`);
+
+    if (result.type === 'resource') {
+      return {
+        content: [
+          {
+            type: 'resource',
+            resource: result.resource,
+          },
+        ],
+      };
+    }
+    
+    const response = {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2) || 'null',
+        },
+      ],
+    };
+    
+    console.error(`[MCP] Returning response for tool '${name}'`);
+    return response;
   }
 
   /**
