@@ -33,6 +33,13 @@ export class YahooFantasyClient {
   private isRefreshing = false;
   private refreshPromise?: Promise<void>;
   private requestTimeout = 60000; // 60 seconds default timeout (increased for deployed environments)
+  private maxRetries = 3; // Maximum number of retries for failed requests
+  private retryDelay = 1000; // Initial retry delay in milliseconds
+  private maxRetryDelay = 10000; // Maximum retry delay
+  private circuitBreakerThreshold = 5; // Number of consecutive failures before circuit opens
+  private circuitBreakerTimeout = 60000; // Circuit breaker timeout in milliseconds
+  private consecutiveFailures = 0; // Track consecutive failures
+  private circuitOpenTime = 0; // When circuit was opened
 
   constructor(credentials: OAuthCredentials, tokenSaveCallback?: (credentials: OAuthCredentials) => Promise<void>) {
     this.oauthClient = new YahooOAuthClient(credentials);
@@ -40,9 +47,11 @@ export class YahooFantasyClient {
     
     // Set timeout based on environment
     if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) {
-      this.requestTimeout = 90000; // 90 seconds for production/deployed environments
+      this.requestTimeout = 120000; // 120 seconds for production/deployed environments
+      this.maxRetries = 5; // More retries in production
     } else {
       this.requestTimeout = 30000; // 30 seconds for local development
+      this.maxRetries = 2; // Fewer retries in development
     }
   }
 
@@ -234,17 +243,71 @@ export class YahooFantasyClient {
   }
 
   /**
+   * Calculate exponential backoff delay for retries
+   */
+  private calculateRetryDelay(attempt: number): number {
+    const delay = this.retryDelay * Math.pow(2, attempt - 1);
+    return Math.min(delay, this.maxRetryDelay);
+  }
+
+  /**
+   * Sleep for specified milliseconds
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Check if circuit breaker is open
+   */
+  private isCircuitOpen(): boolean {
+    if (this.consecutiveFailures >= this.circuitBreakerThreshold) {
+      const now = Date.now();
+      if (now - this.circuitOpenTime > this.circuitBreakerTimeout) {
+        // Circuit breaker timeout expired, allow one request to test
+        console.error('🔄 Circuit breaker timeout expired, allowing test request');
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Record successful request (reset circuit breaker)
+   */
+  private recordSuccess(): void {
+    this.consecutiveFailures = 0;
+    this.circuitOpenTime = 0;
+  }
+
+  /**
+   * Record failed request (increment circuit breaker)
+   */
+  private recordFailure(): void {
+    this.consecutiveFailures++;
+    if (this.consecutiveFailures >= this.circuitBreakerThreshold) {
+      this.circuitOpenTime = Date.now();
+      console.error(`🚨 Circuit breaker opened after ${this.consecutiveFailures} consecutive failures`);
+    }
+  }
+
+  /**
    * Make authenticated request to Yahoo Fantasy API
    */
   private async makeRequest<T>(
     method: 'GET' | 'POST' | 'PUT',
     endpoint: string,
     data?: any,
-    retryCount = 0,
-    maxRetries = 2
+    retryCount = 0
   ): Promise<T> {
     if (!this.oauthClient.hasValidAccessToken()) {
       throw new AuthenticationError('No valid access token available. Please authenticate first.');
+    }
+
+    // Check circuit breaker
+    if (this.isCircuitOpen()) {
+      throw new NetworkError('Circuit breaker is open due to consecutive failures. Please try again later.');
     }
 
     // Proactively refresh token if it's close to expiration
@@ -279,12 +342,20 @@ export class YahooFantasyClient {
 
     // Add timeout to fetch request
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
+    const timeoutId = setTimeout(() => {
+      console.error(`⏰ Request timeout after ${this.requestTimeout}ms for ${method} ${endpoint}`);
+      controller.abort();
+    }, this.requestTimeout);
     fetchOptions.signal = controller.signal;
 
     try {
+      console.error(`🚀 Making ${method} request to ${endpoint} (timeout: ${this.requestTimeout}ms, retry: ${retryCount}/${this.maxRetries})`);
       const response = await fetch(url, fetchOptions);
       clearTimeout(timeoutId);
+      console.error(`✅ Request completed successfully for ${method} ${endpoint}`);
+      
+      // Record successful request
+      this.recordSuccess();
       
       if (!response.ok) {
         // Try to get error details from response
@@ -357,6 +428,9 @@ export class YahooFantasyClient {
       // Clear timeout if we hit an error
       clearTimeout(timeoutId);
       
+      // Record failure for circuit breaker
+      this.recordFailure();
+      
       // Re-throw our custom errors
       if (error instanceof YahooFantasyError) {
         throw error;
@@ -364,22 +438,23 @@ export class YahooFantasyClient {
       
       // Handle network errors with retry logic
       if (error.name === 'AbortError') {
-        if (retryCount < maxRetries) {
-          console.error(`⏰ Request timeout after ${this.requestTimeout}ms, retrying (${retryCount + 1}/${maxRetries})...`);
-          // Exponential backoff: wait 2^retryCount seconds
-          const delay = Math.pow(2, retryCount) * 1000;
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return this.makeRequest(method, endpoint, data, retryCount + 1, maxRetries);
+        if (retryCount < this.maxRetries) {
+          const delay = this.calculateRetryDelay(retryCount + 1);
+          console.error(`⏰ Request timeout after ${this.requestTimeout}ms for ${method} ${endpoint}, retrying (${retryCount + 1}/${this.maxRetries}) in ${delay}ms...`);
+          console.error(`   Environment: ${process.env.NODE_ENV || 'development'}, Railway: ${process.env.RAILWAY_ENVIRONMENT || 'false'}`);
+          await this.sleep(delay);
+          return this.makeRequest(method, endpoint, data, retryCount + 1);
         }
-        throw new NetworkError(`Request timeout after ${this.requestTimeout}ms (${maxRetries} retries attempted)`, error);
+        console.error(`❌ Final timeout failure for ${method} ${endpoint} after ${this.maxRetries} retries`);
+        throw new NetworkError(`Request timeout after ${this.requestTimeout}ms (${this.maxRetries} retries attempted). This may indicate network issues or Yahoo API slowness.`, error);
       }
       
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        if (retryCount < maxRetries) {
-          console.error(`🌐 Network connection failed, retrying (${retryCount + 1}/${maxRetries})...`);
-          const delay = Math.pow(2, retryCount) * 1000;
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return this.makeRequest(method, endpoint, data, retryCount + 1, maxRetries);
+        if (retryCount < this.maxRetries) {
+          const delay = this.calculateRetryDelay(retryCount + 1);
+          console.error(`🌐 Network connection failed, retrying (${retryCount + 1}/${this.maxRetries}) in ${delay}ms...`);
+          await this.sleep(delay);
+          return this.makeRequest(method, endpoint, data, retryCount + 1);
         }
         throw new NetworkError('Network connection failed. Please check your internet connection.', error);
       }
