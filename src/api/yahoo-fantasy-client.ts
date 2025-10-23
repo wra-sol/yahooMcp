@@ -501,210 +501,57 @@ export class YahooFantasyClient {
   /**
    * Get user's leagues for a specific game
    */
-  async getUserLeagues(gameKey: string): Promise<{ leagues: League[]; count: number }> {
-    const response = await this.makeRequest<any>('GET', `/users;use_login=1/games;game_keys=${gameKey}/leagues`);
-    
-    // Yahoo API returns deeply nested object structure with numeric keys
-    
-    try {
-      // Debug: Log the structure we received
-      if (!response || typeof response !== 'object') {
-        console.error('❌ getUserLeagues: Invalid response type:', typeof response);
-        return { leagues: [], count: 0 };
-      }
-      
-      const usersObj = response.users;
-      if (!usersObj || typeof usersObj !== 'object') {
-        console.error('❌ getUserLeagues: Missing or invalid users object');
-        console.error('   Response keys:', Object.keys(response));
-        return { leagues: [], count: 0 };
-      }
-      
-      // Get first user (users.0)
-      const firstUser = usersObj['0'] || usersObj[0];
-      if (!firstUser || !firstUser.user || !Array.isArray(firstUser.user)) {
-        return { leagues: [], count: 0 };
-      }
-      
-      // Find games object in user array
-      let gamesObj = null;
-      for (const item of firstUser.user) {
-        if (item.games) {
-          gamesObj = item.games;
-          break;
-        }
-      }
-      
-      if (!gamesObj || typeof gamesObj !== 'object') {
-        return { leagues: [], count: 0 };
-      }
-      
-      // Get first game (games.0)
-      const firstGame = gamesObj['0'] || gamesObj[0];
-      if (!firstGame || !firstGame.game || !Array.isArray(firstGame.game)) {
-        return { leagues: [], count: 0 };
-      }
-      
-      // Find leagues object in game array
-      let leaguesObj = null;
-      for (const item of firstGame.game) {
-        if (item.leagues) {
-          leaguesObj = item.leagues;
-          break;
-        }
-      }
-      
-      if (!leaguesObj || typeof leaguesObj !== 'object') {
-        return { leagues: [], count: 0 };
-      }
-      
-      // Extract count
-      const leagueCount = leaguesObj.count || 0;
-      
-      // Extract league objects from numeric keys
-      const leagues: any[] = [];
-      for (const key in leaguesObj) {
-        if (key !== 'count' && leaguesObj[key]?.league) {
-          leagues.push(leaguesObj[key].league);
-        }
-      }
-      
-      return {
-        leagues,
-        count: leagueCount || leagues.length,
-      };
-    } catch (error: any) {
-      console.error('❌ Error parsing getUserLeagues response:', error.message);
-      return { leagues: [], count: 0 };
-    }
+  async getUserLeagues(gameKey: string): Promise<string> {
+    return this.makeRequest<string>('GET', `/users;use_login=1/games;game_keys=${gameKey}/leagues`);
   }
 
   /**
    * Get user profile information
    */
-  async getUserProfile(): Promise<User> {
-    const response = await this.makeRequest<any>('GET', `/users;use_login=1`);
-    
-    // Yahoo API returns deeply nested object structure with numeric keys
-    
-    try {
-      const usersObj = response.users;
-      if (!usersObj || typeof usersObj !== 'object') {
-        throw new Error('No users object in response');
-      }
-      
-      // Get first user (users.0)
-      const firstUser = usersObj['0'] || usersObj[0];
-      if (!firstUser || !firstUser.user || !Array.isArray(firstUser.user)) {
-        throw new Error('No user array in response');
-      }
-      
-      // Merge all user profile data from array
-      let profile: any = {};
-      for (const item of firstUser.user) {
-        if (typeof item === 'object' && !Array.isArray(item)) {
-          profile = { ...profile, ...item };
-        }
-      }
-      
-      return profile as User;
-    } catch (error: any) {
-      console.error('❌ Error parsing getUserProfile response:', error.message);
-      throw error;
-    }
+  async getUserProfile(): Promise<string> {
+    return this.makeRequest<string>('GET', `/users;use_login=1`);
   }
 
   /**
    * Get all teams for the current user across games
    */
-  async getUserTeams(): Promise<{ teams: Team[]; count: number }> {
-    const response = await this.makeRequest<any>('GET', `/users;use_login=1/teams`);
-    
-    // Yahoo API returns deeply nested object structure with numeric keys
-    
-    try {
-      const usersObj = response.users;
-      if (!usersObj || typeof usersObj !== 'object') {
-        return { teams: [], count: 0 };
-      }
-      
-      // Get first user (users.0)
-      const firstUser = usersObj['0'] || usersObj[0];
-      if (!firstUser || !firstUser.user || !Array.isArray(firstUser.user)) {
-        return { teams: [], count: 0 };
-      }
-      
-      // Find teams object in user array
-      let teamsObj = null;
-      for (const item of firstUser.user) {
-        if (item.teams) {
-          teamsObj = item.teams;
-          break;
-        }
-      }
-      
-      if (!teamsObj || typeof teamsObj !== 'object') {
-        return { teams: [], count: 0 };
-      }
-      
-      // Extract count
-      const teamCount = teamsObj.count || 0;
-      
-      // Extract team objects from numeric keys
-      const teams: any[] = [];
-      for (const key in teamsObj) {
-        if (key !== 'count' && teamsObj[key]?.team) {
-          teams.push(teamsObj[key].team);
-        }
-      }
-      
-      return {
-        teams,
-        count: teamCount || teams.length,
-      };
-    } catch (error: any) {
-      console.error('❌ Error parsing getUserTeams response:', error.message);
-      return { teams: [], count: 0 };
-    }
+  async getUserTeams(): Promise<string> {
+    return this.makeRequest<string>('GET', `/users;use_login=1/teams`);
   }
 
   /**
    * Get historical league data (past seasons)
    */
-  async getLeagueHistory(leagueKey: string): Promise<any> {
+  async getLeagueHistory(leagueKey: string): Promise<string> {
     // Yahoo API allows fetching historical data via past league keys
     // This returns league information with historical standings and results
-    return this.makeRequest<any>('GET', `/league/${leagueKey};out=standings,settings,scoreboard`);
+    return this.makeRequest<string>('GET', `/league/${leagueKey};out=standings,settings,scoreboard`);
   }
 
   /**
    * Get historical team performance data
    */
-  async getTeamHistory(teamKey: string): Promise<any> {
+  async getTeamHistory(teamKey: string): Promise<string> {
     // Get team with historical stats, matchups, and standings
-    return this.makeRequest<any>('GET', `/team/${teamKey};out=stats,standings,matchups`);
+    return this.makeRequest<string>('GET', `/team/${teamKey};out=stats,standings,matchups`);
   }
 
   /**
    * Get live scoring updates for a league
    */
-  async getLiveScores(leagueKey: string, week?: string): Promise<{ matchups: Matchup[]; count: number }> {
+  async getLiveScores(leagueKey: string, week?: string): Promise<string> {
     // Live scores are available via scoreboard with current stats
     const weekParam = week ? `;week=${week}` : '';
     const endpoint = `/league/${leagueKey}/scoreboard${weekParam};out=matchups`;
-    const response = await this.makeRequest<any>('GET', endpoint);
-    return {
-      matchups: response.scoreboard?.matchups || [],
-      count: response.scoreboard?.count || 0,
-    };
+    return this.makeRequest<string>('GET', endpoint);
   }
 
   /**
    * Get real-time game updates
    */
-  async getGameUpdates(gameKey: string): Promise<any> {
+  async getGameUpdates(gameKey: string): Promise<string> {
     // Get current game state and updates
-    return this.makeRequest<any>('GET', `/game/${gameKey};out=game_weeks,stat_categories`);
+    return this.makeRequest<string>('GET', `/game/${gameKey};out=game_weeks,stat_categories`);
   }
 
   /**
@@ -769,7 +616,7 @@ export class YahooFantasyClient {
   /**
    * Get league metadata
    */
-  async getLeagueMetadata(leagueKey: string): Promise<any> {
+  async getLeagueMetadata(leagueKey: string): Promise<string> {
     // Use longer timeout for league metadata as it can be slow
     const originalTimeout = this.requestTimeout;
     this.requestTimeout = 90000; // 90 seconds for league metadata
@@ -777,7 +624,7 @@ export class YahooFantasyClient {
     try {
       // Yahoo supports metadata via out param or a dedicated subresource
       // Prefer direct subresource if available
-      return this.makeRequest<any>('GET', `/league/${leagueKey}/metadata`);
+      return this.makeRequest<string>('GET', `/league/${leagueKey}/metadata`);
     } finally {
       // Restore original timeout
       this.requestTimeout = originalTimeout;
@@ -845,69 +692,46 @@ export class YahooFantasyClient {
   /**
    * Get league scoreboard/matchups
    */
-  async getLeagueScoreboard(leagueKey: string, week?: string): Promise<{ matchups: any[]; count: number }> {
-    const weekParam = week ? `;week=${week}` : '';
-    const endpoint = `/league/${leagueKey}/scoreboard${weekParam}`;
-    const response = await this.makeRequest<any>('GET', endpoint);
-
-    // Check if response has league array structure (similar to team endpoints)
-    if (response.league && Array.isArray(response.league)) {
-      for (const item of response.league) {
-        if (item.scoreboard) {
-          // Yahoo nests scoreboard data inside a "0" key
-          const scoreboardData = item.scoreboard["0"] || item.scoreboard;
-          const matchupsCollection = scoreboardData?.matchups;
-          
-          if (matchupsCollection && typeof matchupsCollection === 'object') {
-            const matchups: any[] = [];
-            for (const key in matchupsCollection) {
-              if (key === 'count') continue;
-              const matchupData = matchupsCollection[key]?.matchup;
-              if (!matchupData) continue;
-              if (Array.isArray(matchupData)) {
-                matchups.push(matchupData);
-              } else {
-                matchups.push([matchupData]);
-              }
-            }
-            const count = Number(matchupsCollection.count ?? matchups.length);
-            return { matchups, count };
-          }
-        }
-      }
-    }
-
-    // Fallback: check for direct scoreboard.matchups property
-    const matchupsCollection = response.scoreboard?.matchups;
-    if (!matchupsCollection || typeof matchupsCollection !== 'object') {
-      return { matchups: [], count: 0 };
-    }
-
-    const matchups: any[] = [];
-    for (const key in matchupsCollection) {
-      if (key === 'count') continue;
-      const matchupData = matchupsCollection[key]?.matchup;
-      if (!matchupData) continue;
-      if (Array.isArray(matchupData)) {
-        matchups.push(matchupData);
+  async getLeagueScoreboard(leagueKey: string, week?: string): Promise<string> {
+    console.error(`🏈 [getLeagueScoreboard] Starting request for league: ${leagueKey}, week: ${week || 'current'}`);
+    
+    // Use longer timeout for scoreboard as it can be very large
+    const originalTimeout = this.requestTimeout;
+    this.requestTimeout = 120000; // 2 minutes for scoreboard (large XML responses)
+    
+    try {
+      const weekParam = week ? `;week=${week}` : '';
+      const endpoint = `/league/${leagueKey}/scoreboard${weekParam}`;
+      console.error(`🏈 [getLeagueScoreboard] Endpoint: ${endpoint}`);
+      console.error(`🏈 [getLeagueScoreboard] Using timeout: ${this.requestTimeout}ms`);
+      
+      const response = await this.makeRequest<string>('GET', endpoint);
+      console.error(`🏈 [getLeagueScoreboard] Raw response type: ${typeof response}`);
+      console.error(`🏈 [getLeagueScoreboard] Response length: ${response ? response.length : 'null/undefined'} chars`);
+      
+      // Check if response is XML string (expected format)
+      if (typeof response === 'string') {
+        console.error(`🏈 [getLeagueScoreboard] Response is XML string (${response.length} chars):`, response.substring(0, 500));
+        console.error(`🏈 [getLeagueScoreboard] Returning XML response directly`);
+        return response;
       } else {
-        matchups.push([matchupData]);
+        console.error(`🏈 [getLeagueScoreboard] Unexpected response type: ${typeof response}`);
+        console.error(`🏈 [getLeagueScoreboard] Response:`, response);
+        return '';
       }
+    } finally {
+      // Restore original timeout
+      this.requestTimeout = originalTimeout;
+      console.error(`🏈 [getLeagueScoreboard] Restored timeout to: ${this.requestTimeout}ms`);
     }
-
-    const count = Number(matchupsCollection.count ?? matchups.length);
-    return {
-      matchups,
-      count,
-    };
   }
 
   /**
    * Get league-wide statistics
    */
-  async getLeagueStats(leagueKey: string): Promise<any> {
+  async getLeagueStats(leagueKey: string): Promise<string> {
     // Get league stats through standings and teams with stats
-    return this.makeRequest<any>('GET', `/league/${leagueKey};out=standings,teams`);
+    return this.makeRequest<string>('GET', `/league/${leagueKey};out=standings,teams`);
   }
 
   /**
@@ -944,13 +768,13 @@ export class YahooFantasyClient {
     teamKey: string,
     statType: 'season' | 'lastweek' | 'lastmonth' | 'date' | 'week' = 'season',
     options?: { season?: string; week?: string; date?: string }
-  ): Promise<any> {
+  ): Promise<string> {
     const params: string[] = [`type=${statType}`];
     if (options?.season) params.push(`season=${options.season}`);
     if (options?.week) params.push(`week=${options.week}`);
     if (options?.date) params.push(`date=${options.date}`);
     const suffix = params.length ? `;${params.join(';')}` : '';
-    return this.makeRequest<any>('GET', `/team/${teamKey}/stats${suffix}`);
+    return this.makeRequest<string>('GET', `/team/${teamKey}/stats${suffix}`);
   }
 
   /**
@@ -965,56 +789,10 @@ export class YahooFantasyClient {
   /**
    * Get team matchups
    */
-  async getTeamMatchups(teamKey: string, week?: string): Promise<{ matchups: any[]; count: number }> {
+  async getTeamMatchups(teamKey: string, week?: string): Promise<string> {
     const weekParam = week ? `;week=${week}` : '';
     const endpoint = `/team/${teamKey}/matchups${weekParam}`;
-    const response = await this.makeRequest<any>('GET', endpoint);
-
-    // Check if response has team array structure (like roster endpoint)
-    if (response.team && Array.isArray(response.team)) {
-      for (const item of response.team) {
-        if (item.matchups) {
-          const matchupsCollection = item.matchups;
-          const matchups: any[] = [];
-          for (const key in matchupsCollection) {
-            if (key === 'count') continue;
-            const matchupData = matchupsCollection[key]?.matchup;
-            if (!matchupData) continue;
-            if (Array.isArray(matchupData)) {
-              matchups.push(matchupData);
-            } else {
-              matchups.push([matchupData]);
-            }
-          }
-          const count = Number(matchupsCollection.count ?? matchups.length);
-          return { matchups, count };
-        }
-      }
-    }
-
-    // Fallback: check for direct matchups property
-    const matchupsCollection = response.matchups;
-    if (!matchupsCollection || typeof matchupsCollection !== 'object') {
-      return { matchups: [], count: 0 };
-    }
-
-    const matchups: any[] = [];
-    for (const key in matchupsCollection) {
-      if (key === 'count') continue;
-      const matchupData = matchupsCollection[key]?.matchup;
-      if (!matchupData) continue;
-      if (Array.isArray(matchupData)) {
-        matchups.push(matchupData);
-      } else {
-        matchups.push([matchupData]);
-      }
-    }
-
-    const count = Number(matchupsCollection.count ?? matchups.length);
-    return {
-      matchups,
-      count,
-    };
+    return this.makeRequest<string>('GET', endpoint);
   }
 
   /**
@@ -1025,16 +803,12 @@ export class YahooFantasyClient {
     leagueKey: string,
     week?: string,
     teamKeys?: string[]
-  ): Promise<{ matchups: Matchup[]; count: number }> {
+  ): Promise<string> {
     const weekParam = week ? `;week=${week}` : '';
     const teamKeysParam = teamKeys?.length ? `;team_keys=${teamKeys.join(',')}` : '';
     // Use scoreboard with teams subresource to get detailed matchup info
     const endpoint = `/league/${leagueKey}/scoreboard${weekParam}${teamKeysParam};out=teams,matchups`;
-    const response = await this.makeRequest<any>('GET', endpoint);
-    return {
-      matchups: response.scoreboard?.matchups || [],
-      count: response.scoreboard?.count || 0,
-    };
+    return this.makeRequest<string>('GET', endpoint);
   }
 
   /**
@@ -1072,16 +846,16 @@ export class YahooFantasyClient {
   /**
    * Get player ownership within a league
    */
-  async getPlayerOwnership(leagueKey: string, playerKey: string): Promise<any> {
+  async getPlayerOwnership(leagueKey: string, playerKey: string): Promise<string> {
     const endpoint = `/league/${leagueKey}/players;player_keys=${playerKey}/ownership`;
-    return this.makeRequest<any>('GET', endpoint);
+    return this.makeRequest<string>('GET', endpoint);
   }
 
   /**
    * Get Yahoo editorial player notes
    */
-  async getPlayerNotes(playerKey: string): Promise<any> {
-    return this.makeRequest<any>('GET', `/player/${playerKey}/notes`);
+  async getPlayerNotes(playerKey: string): Promise<string> {
+    return this.makeRequest<string>('GET', `/player/${playerKey}/notes`);
   }
 
   /**
@@ -1120,23 +894,10 @@ export class YahooFantasyClient {
   /**
    * Get players on injured reserve for a team
    */
-  async getInjuredReserve(teamKey: string): Promise<{ players: Player[]; count: number }> {
+  async getInjuredReserve(teamKey: string): Promise<string> {
     // Get roster with IR players - typically shown via status
     const endpoint = `/team/${teamKey}/roster`;
-    const response = await this.makeRequest<any>('GET', endpoint);
-    const allPlayers = response.roster?.players || [];
-    // Filter for injured/IR status players
-    const irPlayers = allPlayers.filter((p: Player) => 
-      p.status === 'IR' || 
-      p.status === 'PUP' || 
-      p.status === 'O' || 
-      p.status === 'D' ||
-      p.on_disabled_list === '1'
-    );
-    return {
-      players: irPlayers,
-      count: irPlayers.length,
-    };
+    return this.makeRequest<string>('GET', endpoint);
   }
 
   /**
@@ -1211,10 +972,9 @@ export class YahooFantasyClient {
     tradeeTeamKey: string,
     players: Array<{ playerKey: string; sourceTeamKey: string; destinationTeamKey: string }>,
     tradeNote?: string
-  ): Promise<Transaction> {
+  ): Promise<string> {
     const xmlData = this.buildTradeXML(traderTeamKey, tradeeTeamKey, players, tradeNote);
-    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
-    return response.transaction;
+    return this.makeRequest<string>('POST', `/league/${leagueKey}/transactions`, xmlData);
   }
 
   /**
@@ -1224,10 +984,9 @@ export class YahooFantasyClient {
     leagueKey: string,
     transactionKey: string,
     tradeNote?: string
-  ): Promise<Transaction> {
+  ): Promise<string> {
     const xmlData = this.buildAcceptTradeXML(transactionKey, tradeNote);
-    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
-    return response.transaction;
+    return this.makeRequest<string>('POST', `/league/${leagueKey}/transactions`, xmlData);
   }
 
   /**
@@ -1237,10 +996,9 @@ export class YahooFantasyClient {
     leagueKey: string,
     transactionKey: string,
     tradeNote?: string
-  ): Promise<Transaction> {
+  ): Promise<string> {
     const xmlData = this.buildRejectTradeXML(transactionKey, tradeNote);
-    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
-    return response.transaction;
+    return this.makeRequest<string>('POST', `/league/${leagueKey}/transactions`, xmlData);
   }
 
   /**
@@ -1249,10 +1007,9 @@ export class YahooFantasyClient {
   async cancelTrade(
     leagueKey: string,
     transactionKey: string
-  ): Promise<Transaction> {
+  ): Promise<string> {
     const xmlData = this.buildCancelTradeXML(transactionKey);
-    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
-    return response.transaction;
+    return this.makeRequest<string>('POST', `/league/${leagueKey}/transactions`, xmlData);
   }
 
   /**
@@ -1262,10 +1019,9 @@ export class YahooFantasyClient {
     leagueKey: string,
     transactionKey: string,
     vote: 'allow' | 'veto'
-  ): Promise<Transaction> {
+  ): Promise<string> {
     const xmlData = this.buildVoteTradeXML(transactionKey, vote);
-    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
-    return response.transaction;
+    return this.makeRequest<string>('POST', `/league/${leagueKey}/transactions`, xmlData);
   }
 
   /**
@@ -1274,10 +1030,9 @@ export class YahooFantasyClient {
   async cancelWaiverClaim(
     leagueKey: string,
     transactionKey: string
-  ): Promise<Transaction> {
+  ): Promise<string> {
     const xmlData = this.buildCancelWaiverXML(transactionKey);
-    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
-    return response.transaction;
+    return this.makeRequest<string>('POST', `/league/${leagueKey}/transactions`, xmlData);
   }
 
   /**
@@ -1288,10 +1043,9 @@ export class YahooFantasyClient {
     transactionKey: string,
     faabBid: number,
     priority?: number
-  ): Promise<Transaction> {
+  ): Promise<string> {
     const xmlData = this.buildEditWaiverXML(transactionKey, faabBid, priority);
-    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
-    return response.transaction;
+    return this.makeRequest<string>('POST', `/league/${leagueKey}/transactions`, xmlData);
   }
 
   /**
@@ -1312,10 +1066,9 @@ export class YahooFantasyClient {
       maxTeams?: string;
       [key: string]: string | undefined;
     }
-  ): Promise<LeagueSettings> {
+  ): Promise<string> {
     const xmlData = this.buildEditLeagueSettingsXML(settings);
-    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/settings`, xmlData);
-    return response.settings;
+    return this.makeRequest<string>('POST', `/league/${leagueKey}/settings`, xmlData);
   }
 
   /**
@@ -1330,10 +1083,9 @@ export class YahooFantasyClient {
       addPlayerKey?: string;
       dropPlayerKey?: string;
     }
-  ): Promise<Transaction> {
+  ): Promise<string> {
     const xmlData = this.buildManageRosterXML(action, teamKey, players);
-    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
-    return response.transaction;
+    return this.makeRequest<string>('POST', `/league/${leagueKey}/transactions`, xmlData);
   }
 
   /**
@@ -1345,10 +1097,9 @@ export class YahooFantasyClient {
     transactionKey: string,
     action: 'approve' | 'reject',
     note?: string
-  ): Promise<Transaction> {
+  ): Promise<string> {
     const xmlData = this.buildProcessTransactionXML(transactionKey, action, note);
-    const response = await this.makeRequest<any>('POST', `/league/${leagueKey}/transactions`, xmlData);
-    return response.transaction;
+    return this.makeRequest<string>('POST', `/league/${leagueKey}/transactions`, xmlData);
   }
 
   /**

@@ -100,12 +100,12 @@ export class YahooFantasyMcpServer {
         // Execute the tool with progress updates for long-running operations
         console.error(`[MCP] Starting tool execution: ${name}`);
         
-        // For get_league_settings, implement a timeout-aware approach
-        if (name === 'get_league_settings') {
-          console.error(`[MCP] Using extended timeout for get_league_settings`);
+        // For get_league_settings and get_league_scoreboard, implement a timeout-aware approach
+        if (name === 'get_league_settings' || name === 'get_league_scoreboard') {
+          console.error(`[MCP] Using extended timeout for ${name}`);
           
           // Set a reasonable timeout that should work with most MCP clients
-          const timeoutMs = 120000; // 2 minutes (should be enough for 90s API call)
+          const timeoutMs = 150000; // 2.5 minutes (should be enough for large XML responses)
           
           const result = await Promise.race([
             this.fantasyTools.executeTool(name, args),
